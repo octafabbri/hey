@@ -1,5 +1,6 @@
 import React from 'react';
-import { Message, ParsedResponseItem, ParkingSpot, RestStop, WorkoutLocation, VehicleInspectionStep, WellnessTechnique } from '../types';
+import { Message, ParsedResponseItem, ParkingSpot, RestStop, WorkoutLocation, VehicleInspectionStep, WellnessTechnique, ServiceRequest } from '../types';
+import { generateServiceRequestPDF, downloadPDF } from '../services/pdfService';
 
 interface ChatMessageProps {
   message: Message;
@@ -11,7 +12,63 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, onBookParking }) => 
   const BubbleColors = isUser ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200';
   const Alignment = isUser ? 'items-end' : 'items-start';
 
-  const renderData = (data: ParsedResponseItem[] | VehicleInspectionStep | WellnessTechnique[] | string) => {
+  const renderData = (data: ParsedResponseItem[] | VehicleInspectionStep | WellnessTechnique[] | ServiceRequest | string) => {
+    console.log('🎨 ChatMessage renderData called with:', {
+      dataType: typeof data,
+      isObject: typeof data === 'object',
+      hasServiceType: data && typeof data === 'object' && 'service_type' in data,
+      hasUrgency: data && typeof data === 'object' && 'urgency' in data,
+      data: data
+    });
+
+    // Handle ServiceRequest data - show summary and download button
+    if (data && typeof data === 'object' && 'service_type' in data && 'urgency' in data) {
+      console.log('✅ ServiceRequest detected! Rendering PDF download button');
+      const request = data as ServiceRequest;
+
+      return (
+        <div className="mt-2 p-3 bg-gray-700 rounded-lg">
+          <h4 className="font-semibold text-blue-300 mb-2">
+            <i className="fa-solid fa-file-lines mr-2"></i>
+            Work Order Ready
+          </h4>
+
+          <div className="text-sm text-gray-300 space-y-1 mb-3">
+            <p><strong>Service:</strong> {request.service_type.replace(/_/g, ' ')}</p>
+            <p>
+              <strong>Urgency:</strong>{' '}
+              <span className={
+                request.urgency === 'ERS' ? 'text-red-400 font-bold' :
+                request.urgency === 'DELAYED' ? 'text-orange-400' : 'text-green-400'
+              }>
+                {request.urgency}
+              </span>
+            </p>
+            <p><strong>Vehicle:</strong> {request.vehicle.vehicle_type}</p>
+            <p><strong>Location:</strong> {request.location.current_location || 'Unknown'}</p>
+            <p><strong>ID:</strong> <span className="font-mono text-xs">{request.id.slice(0, 13)}</span></p>
+          </div>
+
+          <button
+            onClick={async () => {
+              try {
+                const blob = await generateServiceRequestPDF(request);
+                const filename = `work-order-${request.urgency}-${request.id.slice(0, 8)}.pdf`;
+                downloadPDF(blob, filename);
+              } catch (error) {
+                console.error('PDF generation failed:', error);
+                alert('Failed to generate PDF. Please try again.');
+              }
+            }}
+            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
+          >
+            <i className="fa-solid fa-download mr-2"></i>
+            Download Work Order PDF
+          </button>
+        </div>
+      );
+    }
+
     if (typeof data === 'string') return <p className="whitespace-pre-wrap">{data}</p>;
     
     if (Array.isArray(data)) { 

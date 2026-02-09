@@ -1,5 +1,5 @@
 {
-  "name": "Hey Bib - Octa",
+  "name": "Mr. Roboto - Octa",
   "description": "A voice-activated AI assistant for truck drivers, providing information on weather, traffic, rest stops, vehicle inspections, and more, using Gemini API.",
   "requestFramePermissions": [
     "microphone"

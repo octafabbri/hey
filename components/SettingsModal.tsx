@@ -98,16 +98,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, currentP
           
           <div className="mb-4">
              <p className="text-xs text-gray-400 mb-2">
-               Note: Using high-quality Gemini Neural Voices. Pitch/Rate adjustments may vary by model support.
+               Note: Using high-quality OpenAI TTS voices. Rate/Pitch adjustments are not supported by OpenAI TTS.
              </p>
           </div>
 
-          {/* Rate and Pitch are often ignored by the simple Gemini TTS endpoint, but we keep volume. 
-              Disabling them visually to avoid confusion, or we can keep them if we switch back to browser TTS. 
-              For now, let's keep Volume active and dim Rate/Pitch. */}
+          {/* Rate and Pitch are not supported by OpenAI TTS endpoint, only volume works. */}
           {renderSlider('Volume', 'volume', 0, 1, 0.05, profile.voiceOutput.volume)}
-          {renderSlider('Rate (Not supported on Neural)', 'rate', 0.5, 2, 0.1, profile.voiceOutput.rate, true)}
-          {renderSlider('Pitch (Not supported on Neural)', 'pitch', 0, 2, 0.1, profile.voiceOutput.pitch, true)}
+          {renderSlider('Rate (Not supported by OpenAI)', 'rate', 0.5, 2, 0.1, profile.voiceOutput.rate, true)}
+          {renderSlider('Pitch (Not supported by OpenAI)', 'pitch', 0, 2, 0.1, profile.voiceOutput.pitch, true)}
 
 
           <div className="mb-4">

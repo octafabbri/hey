@@ -1,6 +1,4 @@
 
-import { Chat } from "@google/genai";
-
 export interface GroundingSource {
   uri: string;
   title: string;
@@ -10,7 +8,7 @@ export interface Message {
   id: string;
   sender: 'user' | 'ai' | 'system';
   text: string;
-  data?: ParsedResponseItem[] | VehicleInspectionStep | WellnessTechnique[] | string;
+  data?: ParsedResponseItem[] | VehicleInspectionStep | WellnessTechnique[] | ServiceRequest | string;
   groundingSources?: GroundingSource[];
   timestamp: Date;
 }
@@ -26,6 +24,7 @@ export enum AssistantTask {
   SAFE_PARKING = 'SAFE_PARKING',
   VEHICLE_INSPECTION = 'VEHICLE_INSPECTION',
   MENTAL_WELLNESS_STRESS_REDUCTION = 'MENTAL_WELLNESS_STRESS_REDUCTION',
+  SERVICE_REQUEST = 'SERVICE_REQUEST',
 }
 
 export interface ParsedResponseItem {
@@ -68,6 +67,75 @@ export interface MoodEntry {
   notes?: string; // Optional free-form notes from user's response
 }
 
+// Service Coordination Types
+export enum ServiceType {
+  TOWING = 'TOWING',
+  TIRE_SERVICE = 'TIRE_SERVICE',
+  JUMP_START = 'JUMP_START',
+  FUEL_DELIVERY = 'FUEL_DELIVERY',
+  LOCKOUT = 'LOCKOUT',
+  MECHANICAL_REPAIR = 'MECHANICAL_REPAIR',
+  OTHER = 'OTHER'
+}
+
+export enum VehicleType {
+  TRUCK = 'TRUCK',
+  TRAILER = 'TRAILER'
+}
+
+export enum ServiceUrgency {
+  ERS = 'ERS',           // Emergency Road Service - TODAY/SAME-DAY
+  DELAYED = 'DELAYED',   // Tomorrow/next day
+  SCHEDULED = 'SCHEDULED' // 2+ days out, future appointments
+}
+
+export interface VehicleInfo {
+  vehicle_type: VehicleType; // Required: TRUCK or TRAILER
+  make?: string;
+  model?: string;
+  year?: string;
+  license_plate?: string;
+  unit_number?: string; // Fleet tracking number
+}
+
+export interface LocationInfo {
+  current_location?: string;
+  highway_or_road?: string;
+  nearest_mile_marker?: string;
+  is_safe_location?: boolean;
+}
+
+export interface ScheduledAppointmentInfo {
+  scheduled_date: string;       // e.g., "2025-02-15" or "Next Monday"
+  scheduled_time: string;       // e.g., "10:00 AM" or "Morning"
+  scheduled_location: string;   // Where service should take place
+}
+
+export interface ServiceRequest {
+  id: string;
+  timestamp: Date;
+
+  // Contact
+  driver_name: string;
+  contact_phone: string;
+
+  // Service details
+  service_type: ServiceType;
+  urgency: ServiceUrgency;
+  description: string;
+
+  // Location & vehicle
+  location: LocationInfo;
+  vehicle: VehicleInfo;
+
+  // Scheduled appointment (only for SCHEDULED urgency)
+  scheduled_appointment?: ScheduledAppointmentInfo;
+
+  // Status
+  status: 'draft' | 'submitted' | 'completed';
+  conversation_transcript?: string;
+}
+
 export interface ActiveModalInfo {
   type: 'parkingConfirmation' | 'inspectionItemDetail' | 'settings';
   data: ParkingSpot | VehicleInspectionStep | UserProfile | null;
@@ -91,4 +159,5 @@ export interface UserProfile {
   voiceOutput: VoiceOutputSettings;
   voiceInput: VoiceInputSettings;
   moodHistory: MoodEntry[];
+  serviceRequests: ServiceRequest[]; // Service coordination history
 }
