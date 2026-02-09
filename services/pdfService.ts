@@ -34,10 +34,23 @@ export const generateServiceRequestPDF = async (
 
     const imgData = canvas.toDataURL('image/png');
     const imgWidth = 210; // A4 width in mm
+    const pageHeight = 297; // A4 height in mm
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    // Add image to PDF
-    pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+    let heightLeft = imgHeight;
+    let position = 0;
+
+    // Add first page
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+
+    // Add additional pages if content exceeds one page
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight; // Calculate position for next page
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
 
     // Clean up
     document.body.removeChild(container);
@@ -178,13 +191,31 @@ const renderPDFHTML = (request: ServiceRequest): string => {
           </p>
         </div>
 
+        <!-- Scheduled Appointment (if applicable) -->
+        ${request.scheduled_appointment ? `
+          <div style="margin: 15px 0; border-bottom: 2px solid #000; padding-bottom: 10px;">
+            <h3 style="margin: 5px 0; font-size: 16px; text-transform: uppercase; background: #ffe6cc; padding: 5px;">
+              SCHEDULED APPOINTMENT
+            </h3>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Date:</strong> ${request.scheduled_appointment.scheduled_date}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Time:</strong> ${request.scheduled_appointment.scheduled_time}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Service Location:</strong> ${request.scheduled_appointment.scheduled_location}
+            </p>
+          </div>
+        ` : ''}
+
         <!-- Conversation Transcript (Optional) -->
         ${request.conversation_transcript ? `
           <div style="margin-top: 20px; border-top: 2px solid #000; padding-top: 15px;">
             <h3 style="margin: 5px 0; font-size: 16px; text-transform: uppercase; background: #f0f0f0; padding: 5px;">
               CONVERSATION TRANSCRIPT
             </h3>
-            <div style="background: #f9f9f9; padding: 10px; font-size: 10px; white-space: pre-wrap; font-family: monospace; border: 1px solid #ddd; max-height: 300px; overflow: hidden;">
+            <div style="background: #f9f9f9; padding: 10px; font-size: 10px; white-space: pre-wrap; font-family: monospace; border: 1px solid #ddd; line-height: 1.4;">
 ${request.conversation_transcript}
             </div>
           </div>

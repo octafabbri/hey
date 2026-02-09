@@ -12,7 +12,7 @@ export function PDFGeneratingState({ isDark, documentName = 'Document' }: PDFGen
       style={{
         background: isDark
           ? 'radial-gradient(circle at center, rgba(94, 159, 255, 0.04) 0%, transparent 50%)'
-          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.03) 0%, transparent 50%)',
+          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.05) 0%, transparent 50%)',
       }}
     >
       {/* Main Content Area - Centered Orb */}
@@ -37,8 +37,8 @@ export function PDFGeneratingState({ isDark, documentName = 'Document' }: PDFGen
               className="absolute inset-0 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.28) 0%, transparent 60%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.2) 0%, transparent 60%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.42) 0%, transparent 60%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.32) 0%, transparent 60%)',
                 filter: 'blur(14px)',
               }}
             />
@@ -48,8 +48,8 @@ export function PDFGeneratingState({ isDark, documentName = 'Document' }: PDFGen
               className="absolute inset-0 m-auto w-22 h-22 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, transparent 70%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.26) 0%, transparent 70%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.52) 0%, transparent 70%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.42) 0%, transparent 70%)',
                 filter: 'blur(10px)',
               }}
             />
@@ -59,11 +59,11 @@ export function PDFGeneratingState({ isDark, documentName = 'Document' }: PDFGen
               className="absolute inset-0 m-auto w-20 h-20 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.6) 0%, rgba(94, 159, 255, 0.22) 100%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.5) 0%, rgba(94, 159, 255, 0.18) 100%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.78) 0%, rgba(94, 159, 255, 0.36) 100%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.68) 0%, rgba(94, 159, 255, 0.5) 100%)',
                 boxShadow: isDark
-                  ? '0 0 20px rgba(94, 159, 255, 0.3), inset 0 0 12px rgba(94, 159, 255, 0.25)'
-                  : '0 0 18px rgba(94, 159, 255, 0.24), inset 0 0 10px rgba(94, 159, 255, 0.2)',
+                  ? '0 0 20px rgba(94, 159, 255, 0.5), inset 0 0 12px rgba(94, 159, 255, 0.4)'
+                  : '0 0 18px rgba(94, 159, 255, 0.4), inset 0 0 10px rgba(94, 159, 255, 0.32)',
               }}
             />
           </div>

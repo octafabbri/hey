@@ -105,6 +105,12 @@ export interface LocationInfo {
   is_safe_location?: boolean;
 }
 
+export interface ScheduledAppointmentInfo {
+  scheduled_date: string;       // e.g., "2025-02-15" or "Next Monday"
+  scheduled_time: string;       // e.g., "10:00 AM" or "Morning"
+  scheduled_location: string;   // Where service should take place
+}
+
 export interface ServiceRequest {
   id: string;
   timestamp: Date;
@@ -121,6 +127,9 @@ export interface ServiceRequest {
   // Location & vehicle
   location: LocationInfo;
   vehicle: VehicleInfo;
+
+  // Scheduled appointment (only for SCHEDULED urgency)
+  scheduled_appointment?: ScheduledAppointmentInfo;
 
   // Status
   status: 'draft' | 'submitted' | 'completed';

@@ -18,8 +18,8 @@ export function PDFReadyState({
       className="fixed inset-0 flex flex-col items-center justify-center"
       style={{
         background: isDark
-          ? 'radial-gradient(circle at center, rgba(94, 159, 255, 0.03) 0%, transparent 50%)'
-          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.02) 0%, transparent 50%)',
+          ? 'radial-gradient(circle at center, rgba(94, 159, 255, 0.05) 0%, transparent 50%)'
+          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.04) 0%, transparent 50%)',
       }}
     >
       {/* Main Content Area - Centered Orb */}
@@ -44,7 +44,7 @@ export function PDFReadyState({
               className="absolute inset-0 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.18) 0%, transparent 70%)'
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.5) 0%, transparent 70%)'
                   : 'radial-gradient(circle, rgba(94, 159, 255, 0.12) 0%, transparent 70%)',
                 filter: 'blur(16px)',
               }}
@@ -55,10 +55,10 @@ export function PDFReadyState({
               className="absolute inset-0 m-auto w-20 h-20 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, rgba(94, 159, 255, 0.12) 100%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.28) 0%, rgba(94, 159, 255, 0.1) 100%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.52) 0%, rgba(94, 159, 255, 0.12) 100%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.42) 0%, rgba(94, 159, 255, 0.1) 100%)',
                 boxShadow: isDark
-                  ? '0 0 24px rgba(94, 159, 255, 0.2), inset 0 0 12px rgba(94, 159, 255, 0.15)'
+                  ? '0 0 24px rgba(94, 159, 255, 0.32), inset 0 0 12px rgba(94, 159, 255, 0.15)'
                   : '0 0 20px rgba(94, 159, 255, 0.15), inset 0 0 10px rgba(94, 159, 255, 0.12)',
               }}
             />
@@ -108,6 +108,7 @@ export function PDFReadyState({
         style={{
           paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 0px)',
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* iOS System Material - Frosted glass effect */}
         <div
@@ -176,8 +177,8 @@ export function PDFReadyState({
                 cursor: 'pointer',
                 transition: 'transform 0.1s ease, opacity 0.2s ease',
                 boxShadow: isDark
-                  ? '0 2px 8px rgba(94, 159, 255, 0.3)'
-                  : '0 2px 8px rgba(94, 159, 255, 0.2)',
+                  ? '0 2px 8px rgba(94, 159, 255, 0.5)'
+                  : '0 2px 8px rgba(94, 159, 255, 0.32)',
               }}
               onMouseDown={(e) => {
                 e.currentTarget.style.transform = 'scale(0.98)';

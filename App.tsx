@@ -1,37 +1,56 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Message, AssistantTask, ActiveModalInfo, ParkingSpot, VehicleInspectionStep, UserProfile, MoodEntry, GroundingSource, ServiceRequest } from './types';
-import ChatMessage from './components/ChatMessage';
-import IconButton from './components/IconButton';
-import LoadingSpinner from './components/LoadingSpinner';
+import { AssistantTask, ActiveModalInfo, ParkingSpot, UserProfile, MoodEntry, ServiceRequest } from './types';
 import Modal from './components/Modal';
 import SettingsModal from './components/SettingsModal';
+import { IdleState } from './components/voice-ui/IdleState';
+import { ListeningState } from './components/voice-ui/ListeningState';
+import { ProcessingState } from './components/voice-ui/ProcessingState';
+import { RespondingState } from './components/voice-ui/RespondingState';
+import { UrgentResponseState } from './components/voice-ui/UrgentResponseState';
+import { ResolutionState } from './components/voice-ui/ResolutionState';
+import { PDFGeneratingState } from './components/voice-ui/PDFGeneratingState';
+import { PDFReadyState } from './components/voice-ui/PDFReadyState';
+import { BottomMenuBar } from './components/BottomMenuBar';
+import { SettingsPage } from './components/SettingsPage';
 import { getSpeechRecognition, playAudioContent, stopAudioPlayback, initializeAudio, SpeechRecognition, SpeechRecognitionEvent } from './services/speechService';
-import { determineTaskFromInput, startVehicleInspectionChat, continueVehicleInspectionChat, createNewChatWithTask, parseJsonFromString, extractNameWithAI, generateSpeech, extractServiceDataFromConversation, ChatSession } from './services/aiService';
-import { EXAMPLE_COMMANDS, API_KEY_ERROR_MESSAGE, WELLNESS_CHECKIN_KEYWORDS, WELLNESS_CHECKIN_QUESTIONS, OPENAI_VOICES, SERVICE_REQUEST_KEYWORDS } from './constants';
+import { determineTaskFromInput, startVehicleInspectionChat, continueVehicleInspectionChat, createNewChatWithTask, extractNameWithAI, generateSpeech, extractServiceDataFromConversation, ChatSession } from './services/aiService';
+import { API_KEY_ERROR_MESSAGE, WELLNESS_CHECKIN_KEYWORDS, WELLNESS_CHECKIN_QUESTIONS, OPENAI_VOICES, SERVICE_REQUEST_KEYWORDS } from './constants';
 import { loadUserProfile, saveUserProfile, addMoodEntry } from './services/userProfileService';
 import { createServiceRequest, validateServiceRequest, addServiceRequest } from './services/serviceRequestService';
+import { generateServiceRequestPDF, downloadPDF } from './services/pdfService';
+
+type AssistantState = 'idle' | 'listening' | 'processing' | 'responding' | 'urgent' | 'resolution' | 'pdf-generating' | 'pdf-ready';
+type NavigationTab = 'home' | 'contacts' | 'settings';
 
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Voice-First UI State
+  const [assistantState, setAssistantState] = useState<AssistantState>('idle');
+  const [transcription, setTranscription] = useState('');
+  const [isResponseComplete, setIsResponseComplete] = useState(false);
+  const [isDark, setIsDark] = useState(false);
+  const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
+
+  // Core Assistant State
   const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false); 
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
-  const [userInput, setUserInput] = useState('');
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<ActiveModalInfo | null>(null);
-  
+
+  // Chat Sessions
   const [generalChatSession, setGeneralChatSession] = useState<ChatSession | null>(null);
-  // currentGeneralTask removed as we are unifying the chat session
   const [vehicleInspectionSession, setVehicleInspectionSession] = useState<ChatSession | null>(null);
-  
+
+  // Assistant Lifecycle
   const [assistantStarted, setAssistantStarted] = useState(false);
   const [isAskingName, setIsAskingName] = useState(false);
-  
+
+  // User Profile & Settings
   const [userProfile, setUserProfile] = useState<UserProfile>(loadUserProfile());
   const [availableVoices] = useState<{name: string, id: string}[]>(OPENAI_VOICES);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
+  // Wellness Check-in
   const [isWellnessCheckinActive, setIsWellnessCheckinActive] = useState(false);
   const [wellnessCheckinStep, setWellnessCheckinStep] = useState(0);
   const [pendingMoodEntry, setPendingMoodEntry] = useState<Partial<MoodEntry> | null>(null);
@@ -40,26 +59,39 @@ const App: React.FC = () => {
   const [isServiceRequestActive, setIsServiceRequestActive] = useState(false);
   const [activeServiceRequest, setActiveServiceRequest] = useState<ServiceRequest | null>(null);
   const [serviceRequestSession, setServiceRequestSession] = useState<ChatSession | null>(null);
+  const [completedServiceRequest, setCompletedServiceRequest] = useState<ServiceRequest | null>(null);
 
   // Offline Detection
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
+  // Refs
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  
-  // Refs for custom silence detection
   const silenceTimerRef = useRef<any>(null);
   const transcriptAccumulatorRef = useRef<string>('');
+  const currentAIResponseRef = useRef<string>('');
 
-  const addMessageToChat = useCallback((sender: Message['sender'], text: string, data?: any, groundingSources?: GroundingSource[]) => {
-    setMessages(prev => [...prev, { id: crypto.randomUUID(), sender, text, data, groundingSources, timestamp: new Date() }]);
-  }, []);
+  // Dark Mode Detection - Disabled (always use light mode)
+  // useEffect(() => {
+  //   const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  //   setIsDark(darkModeQuery.matches);
+
+  //   const handleChange = (e: MediaQueryListEvent) => {
+  //     setIsDark(e.matches);
+  //   };
+
+  //   darkModeQuery.addEventListener('change', handleChange);
+  //   return () => darkModeQuery.removeEventListener('change', handleChange);
+  // }, []);
 
   useEffect(() => {
-    if (assistantStarted) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, assistantStarted]);
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDark]);
 
-  // Offline detection for PWA
+  // Offline detection
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -73,26 +105,83 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Map existing states to voice UI states
+  useEffect(() => {
+    if (!assistantStarted) {
+      setAssistantState('idle');
+      return;
+    }
+
+    // Priority order matters!
+    if (completedServiceRequest) {
+      // PDF is ready for download
+      setAssistantState('pdf-ready');
+    } else if (isServiceRequestActive && activeServiceRequest && validateServiceRequest(activeServiceRequest).isComplete) {
+      // Service request complete, generating PDF
+      setAssistantState('pdf-generating');
+    } else if (isServiceRequestActive && activeServiceRequest?.urgency === 'ERS' && isSpeaking) {
+      // Emergency response state
+      setAssistantState('urgent');
+    } else if (isSpeaking) {
+      setAssistantState('responding');
+    } else if (isLoadingAI) {
+      setAssistantState('processing');
+    } else if (isListening) {
+      setAssistantState('listening');
+    } else {
+      setAssistantState('idle');
+    }
+  }, [assistantStarted, isListening, isLoadingAI, isSpeaking, isServiceRequestActive, activeServiceRequest, completedServiceRequest]);
+
   // Handle speaking logic using OpenAI TTS
   const speakAiResponse = useCallback(async (text: string) => {
-    if (!userProfile.voiceOutput.enabled || !text) return;
-    setIsSpeaking(true);
-    try {
-        const voiceName = userProfile.voiceOutput.voiceURI || 'onyx';
-        const base64Audio = await generateSpeech(text, voiceName);
+    console.log('🔊 speakAiResponse called with text:', text);
+    console.log('🔊 Voice output enabled:', userProfile.voiceOutput.enabled);
 
-        if (base64Audio) {
-             await playAudioContent(base64Audio, userProfile.voiceOutput.volume);
-        } else {
-             console.warn("OpenAI TTS failed to generate audio.");
-        }
+    if (!userProfile.voiceOutput.enabled || !text) {
+      console.log('🔊 Early return - voice disabled or no text');
+      return;
+    }
+
+    // Store current response for transcription
+    currentAIResponseRef.current = text;
+    setTranscription(text);
+    setIsResponseComplete(false);
+    setIsSpeaking(true);
+
+    try {
+      const voiceName = userProfile.voiceOutput.voiceURI || 'onyx';
+      console.log('🔊 Generating speech with voice:', voiceName);
+      console.log('🔊 Text to speak:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+
+      const base64Audio = await generateSpeech(text, voiceName);
+
+      if (base64Audio) {
+        console.log('🔊 Audio generated, playing at volume:', userProfile.voiceOutput.volume);
+        await playAudioContent(base64Audio, userProfile.voiceOutput.volume);
+        console.log('🔊 Audio playback completed');
+      } else {
+        console.warn("🔊 OpenAI TTS failed to generate audio - returned null");
+      }
     } catch (e) {
-      console.error("Error speaking AI response:", e);
+      console.error("🔊 Error speaking AI response:", e);
+      console.error("🔊 Error stack:", e instanceof Error ? e.stack : 'No stack trace');
+      console.error("🔊 Error name:", e instanceof Error ? e.name : 'Unknown');
+      console.error("🔊 Error message:", e instanceof Error ? e.message : String(e));
     } finally {
       setIsSpeaking(false);
-    }
-  }, [userProfile.voiceOutput]);
+      setIsResponseComplete(true);
+      console.log('🔊 speakAiResponse finished');
 
+      // Auto-start listening after AI finishes speaking (if assistant is active)
+      if (assistantStarted && !isListening) {
+        console.log('🎤 Auto-starting listening after AI response');
+        setTimeout(() => {
+          toggleListen();
+        }, 500); // Small delay to ensure audio playback is fully complete
+      }
+    }
+  }, [userProfile.voiceOutput, assistantStarted, isListening]); // toggleListen is stable, don't need in deps
 
   // Get time-appropriate greeting
   const getTimeBasedGreeting = useCallback(() => {
@@ -104,7 +193,6 @@ const App: React.FC = () => {
   }, []);
 
   const handleStartAssistant = async () => {
-    // Explicitly initialize audio context on user click to comply with browser autoplay policies
     try {
       await initializeAudio();
     } catch (e) {
@@ -114,7 +202,6 @@ const App: React.FC = () => {
     setAssistantStarted(true);
     if (!import.meta.env.VITE_OPENAI_API_KEY) {
       setApiKeyError(API_KEY_ERROR_MESSAGE);
-      addMessageToChat('system', API_KEY_ERROR_MESSAGE);
       return;
     }
 
@@ -124,14 +211,12 @@ const App: React.FC = () => {
       ? `${timeGreeting}, ${userProfile.userName}! This is Bib. What can I help you with?`
       : `${timeGreeting}! This is Bib. How can I help you today?`;
 
-    addMessageToChat('ai', greeting);
     speakAiResponse(greeting);
   };
-  
-  const handleAiResponseDisplay = useCallback((text: string, data?: any, groundingSources?: GroundingSource[]) => {
-    addMessageToChat('ai', text, data, groundingSources);
+
+  const handleAiResponseDisplay = useCallback((text: string) => {
     speakAiResponse(text);
-  }, [addMessageToChat, speakAiResponse]);
+  }, [speakAiResponse]);
 
   const startWellnessCheckin = useCallback(() => {
     setIsWellnessCheckinActive(true);
@@ -139,9 +224,8 @@ const App: React.FC = () => {
     setPendingMoodEntry({ timestamp: new Date() });
     const firstQuestion = WELLNESS_CHECKIN_QUESTIONS[0];
     const questionText = `${firstQuestion.questionText} ${firstQuestion.scale || ''}`;
-    addMessageToChat('ai', questionText);
     speakAiResponse(questionText);
-  }, [addMessageToChat, speakAiResponse]);
+  }, [speakAiResponse]);
 
   const handleWellnessCheckinResponse = useCallback((responseText: string) => {
     if (!pendingMoodEntry || wellnessCheckinStep >= WELLNESS_CHECKIN_QUESTIONS.length) return;
@@ -150,10 +234,10 @@ const App: React.FC = () => {
     let parsedValue: string | number | undefined = responseText;
 
     if (currentQuestion.key === 'mood_rating' || currentQuestion.key === 'stress_level') {
-      const match = responseText.match(/\b([1-5])\b/); 
+      const match = responseText.match(/\b([1-5])\b/);
       parsedValue = match ? parseInt(match[1], 10) : undefined;
     }
-    
+
     setPendingMoodEntry(prev => ({ ...prev, [currentQuestion.key]: parsedValue }));
 
     const nextStep = wellnessCheckinStep + 1;
@@ -161,33 +245,29 @@ const App: React.FC = () => {
       setWellnessCheckinStep(nextStep);
       const nextQuestion = WELLNESS_CHECKIN_QUESTIONS[nextStep];
       const questionPrompt = `${nextQuestion.questionText} ${nextQuestion.scale || ''}`;
-      addMessageToChat('ai', questionPrompt);
       speakAiResponse(questionPrompt);
     } else {
       const finalEntry = { ...pendingMoodEntry, timestamp: pendingMoodEntry.timestamp || new Date() } as MoodEntry;
       const updatedProfile = addMoodEntry(userProfile, finalEntry);
       setUserProfile(updatedProfile);
       saveUserProfile(updatedProfile);
-      
+
       const ackMsg = "Thanks for sharing. I've logged that for you. Stay safe out there.";
-      addMessageToChat('ai', ackMsg);
       speakAiResponse(ackMsg);
       setIsWellnessCheckinActive(false);
       setWellnessCheckinStep(0);
       setPendingMoodEntry(null);
     }
-  }, [pendingMoodEntry, wellnessCheckinStep, userProfile, addMessageToChat, speakAiResponse]);
+  }, [pendingMoodEntry, wellnessCheckinStep, userProfile, speakAiResponse]);
 
   // Service Request Functions
   const startServiceRequest = useCallback(() => {
-    console.log('🚨🚨🚨 SERVICE REQUEST STARTED 🚨🚨🚨');
+    console.log('🚨 SERVICE REQUEST STARTED');
     const newRequest = createServiceRequest();
     newRequest.driver_name = userProfile.userName || 'Driver';
-    console.log('📝 New service request created:', newRequest);
     setActiveServiceRequest(newRequest);
     setIsServiceRequestActive(true);
 
-    // Create dedicated chat session for service requests
     const session = createNewChatWithTask(
       AssistantTask.SERVICE_REQUEST,
       userProfile.voiceInput.language,
@@ -196,118 +276,111 @@ const App: React.FC = () => {
     setServiceRequestSession(session);
 
     const greeting = "Copy that, I'm here to help. First, are you in a safe spot?";
-    addMessageToChat('ai', greeting);
     speakAiResponse(greeting);
-  }, [userProfile, addMessageToChat, speakAiResponse]);
+  }, [userProfile, speakAiResponse]);
 
   const handleServiceRequestResponse = useCallback(async (text: string) => {
     if (!serviceRequestSession || !activeServiceRequest) return;
 
     console.log('🚨 SERVICE REQUEST - User input:', text);
-    console.log('🚨 SERVICE REQUEST - Current request state:', activeServiceRequest);
 
     setIsLoadingAI(true);
     try {
-      // Send user response to AI
       const response = await serviceRequestSession.sendMessage({ message: text });
       const aiText = response.text;
-      console.log('🤖 AI Response:', aiText);
 
-      // Build conversation history for data extraction
-      const conversationHistory = messages
-        .filter(m => m.sender !== 'system')
-        .map(m => `${m.sender}: ${m.text}`)
-        .join('\n') + `\nuser: ${text}\nai: ${aiText}`;
+      // Build conversation history - APPEND to existing transcript
+      const newExchange = `user: ${text}\nai: ${aiText}`;
+      const fullTranscript = activeServiceRequest.conversation_transcript
+        ? `${activeServiceRequest.conversation_transcript}\n\n${newExchange}`
+        : newExchange;
 
-      // Extract structured data from conversation using Gemini
+      // Extract structured data
+      console.log('🚨 Extracting data from conversation...');
       const extractedData = await extractServiceDataFromConversation(
-        conversationHistory,
+        fullTranscript,
         activeServiceRequest
       );
-      console.log('📊 Extracted data from conversation:', extractedData);
+      console.log('🚨 Extracted data:', extractedData);
 
-      // Merge extracted data with current request
+      // Merge extracted data
       const updatedRequest = {
         ...activeServiceRequest,
         ...extractedData,
-        conversation_transcript: conversationHistory
+        conversation_transcript: fullTranscript
       };
+      console.log('🚨 Merged request:', updatedRequest);
       setActiveServiceRequest(updatedRequest);
 
       // Validate completeness
       const validation = validateServiceRequest(updatedRequest);
-      console.log('🔍 Service Request Validation:', {
-        isComplete: validation.isComplete,
-        missingFields: validation.missingFields,
-        updatedRequest: updatedRequest
-      });
+      console.log('🚨 Validation result:', validation);
+      console.log('🚨 Updated request:', updatedRequest);
 
       if (validation.isComplete) {
+        console.log('🚨 SERVICE REQUEST COMPLETE - Generating PDF');
         // Mark as submitted and save
         updatedRequest.status = 'submitted';
         const updatedProfile = addServiceRequest(userProfile, updatedRequest);
         setUserProfile(updatedProfile);
         saveUserProfile(updatedProfile);
 
-        // Show completion message with ServiceRequest as data
-        const completionMsg = `Got everything. I've created work order ${updatedRequest.id.slice(0, 8)}. Ready to download it?`;
-        console.log('✅ Sending completion message with ServiceRequest data:', updatedRequest);
-        addMessageToChat('ai', completionMsg, updatedRequest);
+        // Transition to PDF generating
+        const completionMsg = `Got everything. Generating your work order now.`;
         speakAiResponse(completionMsg);
 
-        // Reset state
-        setIsServiceRequestActive(false);
-        setActiveServiceRequest(null);
+        // Wait for speech to complete, then generate PDF (longer delay to ensure speech finishes)
+        setTimeout(async () => {
+          setIsServiceRequestActive(false);
+          setActiveServiceRequest(null);
+          setCompletedServiceRequest(updatedRequest);
+        }, 5000);
       } else {
-        // Continue conversation - AI will ask for missing fields
-        addMessageToChat('ai', aiText);
+        console.log('🚨 SERVICE REQUEST INCOMPLETE - Missing:', validation.missingFields);
+        // Continue conversation
         speakAiResponse(aiText);
       }
     } catch (error) {
       console.error("Service request error:", error);
-      addMessageToChat('system', 'Error processing request. Please try again.');
+      speakAiResponse("Error processing request. Please try again.");
     } finally {
       setIsLoadingAI(false);
     }
-  }, [serviceRequestSession, activeServiceRequest, messages, userProfile, addMessageToChat, speakAiResponse]);
-
+  }, [serviceRequestSession, activeServiceRequest, userProfile, speakAiResponse]);
 
   const processUserInput = useCallback(async (text: string) => {
-    console.log('⚡ processUserInput called with:', text, '| isServiceRequestActive:', isServiceRequestActive);
     if (!text.trim()) return;
-    addMessageToChat('user', text);
-    setUserInput(''); 
 
-    if (apiKeyError) {
-      addMessageToChat('ai', "I cannot process requests due to an API key error.");
-      return;
-    }
+    // Update transcription
+    setTranscription(text);
 
+    if (apiKeyError) return;
+
+    // Handle name collection
     if (isAskingName) {
-        setIsLoadingAI(true);
-        try {
-            const name = await extractNameWithAI(text);
-            const updatedProfile = { ...userProfile, userName: name };
-            setUserProfile(updatedProfile);
-            saveUserProfile(updatedProfile);
-            setIsAskingName(false);
-            
-            const welcomeMsg = `Copy that, ${name}. Nice to have you on board. I'm ready when you are.`;
-            handleAiResponseDisplay(welcomeMsg);
-        } catch (error) {
-            console.error("Error setting name:", error);
-            const fallbackMsg = "Didn't quite catch that name, but let's get started.";
-            handleAiResponseDisplay(fallbackMsg);
-            setIsAskingName(false);
-        } finally {
-            setIsLoadingAI(false);
-        }
-        return;
+      setIsLoadingAI(true);
+      try {
+        const name = await extractNameWithAI(text);
+        const updatedProfile = { ...userProfile, userName: name };
+        setUserProfile(updatedProfile);
+        saveUserProfile(updatedProfile);
+        setIsAskingName(false);
+
+        const welcomeMsg = `Copy that, ${name}. Nice to have you on board. I'm ready when you are.`;
+        handleAiResponseDisplay(welcomeMsg);
+      } catch (error) {
+        console.error("Error setting name:", error);
+        const fallbackMsg = "Didn't quite catch that name, but let's get started.";
+        handleAiResponseDisplay(fallbackMsg);
+        setIsAskingName(false);
+      } finally {
+        setIsLoadingAI(false);
+      }
+      return;
     }
 
     // Route to active service request handler
     if (isServiceRequestActive) {
-      console.log('🔀 ROUTING TO SERVICE REQUEST HANDLER - isServiceRequestActive:', isServiceRequestActive);
       handleServiceRequestResponse(text);
       return;
     }
@@ -317,364 +390,367 @@ const App: React.FC = () => {
       return;
     }
 
+    setIsLoadingAI(true);
     const lowerText = text.toLowerCase();
 
-    // Check for service request keywords first (priority for emergencies)
+    // Check for service request keywords
     if (SERVICE_REQUEST_KEYWORDS.some(kw => lowerText.includes(kw))) {
       startServiceRequest();
+      setIsLoadingAI(false);
       return;
     }
 
+    // Check for wellness check-in
     if (WELLNESS_CHECKIN_KEYWORDS.some(kw => lowerText.includes(kw))) {
       startWellnessCheckin();
+      setIsLoadingAI(false);
       return;
     }
 
-    setIsLoadingAI(true);
+    // General chat flow
     try {
-      const isStoppingInspection = lowerText.includes("stop inspection") || lowerText.includes("end inspection");
+      console.log('💬 Starting general chat flow with text:', text);
+      const { task: detectedTask } = determineTaskFromInput(text);
+      console.log('💬 Detected task:', detectedTask);
 
-      if (vehicleInspectionSession && isStoppingInspection) {
-        setVehicleInspectionSession(null);
-        handleAiResponseDisplay("Copy that. Inspection ended.");
-        setIsLoadingAI(false);
-        return;
+      let currentSession = generalChatSession;
+      if (!currentSession) {
+        console.log('💬 Creating new chat session');
+        currentSession = createNewChatWithTask(
+          detectedTask,
+          userProfile.voiceInput.language,
+          userProfile.userName
+        );
+        setGeneralChatSession(currentSession);
       }
-      
-      const { task: newTaskType, requiresJson } = determineTaskFromInput(text);
 
-      if (newTaskType === AssistantTask.VEHICLE_INSPECTION || vehicleInspectionSession) {
-        let currentInspectionSession = vehicleInspectionSession;
-        if (!currentInspectionSession) {
-          currentInspectionSession = startVehicleInspectionChat(userProfile.voiceInput.language, userProfile.userName);
-          setVehicleInspectionSession(currentInspectionSession);
-          const { text: aiText, data: inspectionData } = await continueVehicleInspectionChat(currentInspectionSession, "START_INSPECTION");
-          handleAiResponseDisplay(aiText, inspectionData);
-        } else {
-           const { text: aiText, data: inspectionData } = await continueVehicleInspectionChat(currentInspectionSession, text);
-           handleAiResponseDisplay(aiText, inspectionData);
-        }
-      } else { 
-        // Unified General Context Logic
-        // We do NOT switch sessions based on task keywords anymore. 
-        // We use one continuous 'generalChatSession' which is initialized with GENERAL_ASSISTANCE capabilities (including search).
-        
-        let chatToUse = generalChatSession;
-        
-        if (!chatToUse) {
-          // Initialize the unified session
-          chatToUse = createNewChatWithTask(AssistantTask.GENERAL_ASSISTANCE, userProfile.voiceInput.language, userProfile.userName);
-          setGeneralChatSession(chatToUse);
-        }
-        
-        const response: GenerateContentResponse = await chatToUse.sendMessage({ message: text });
-        const aiResponseText = response.text; 
-        let textToSpeakAndDisplay: string;
-        let groundingSources: GroundingSource[] | undefined = undefined;
-        let messageData: any = null; 
+      console.log('💬 Sending message to AI...');
+      const response = await currentSession.sendMessage({ message: text });
+      const aiText = response.text;
+      console.log('💬 AI response received:', aiText);
 
-        if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
-             const rawGroundingChunks = response.candidates[0].groundingMetadata.groundingChunks;
-             if (rawGroundingChunks && Array.isArray(rawGroundingChunks)) {
-                 groundingSources = rawGroundingChunks
-                     .map(chunk => chunk.web)
-                     .filter(webChunk => webChunk && webChunk.uri && webChunk.title)
-                     .map(webChunk => ({
-                         uri: webChunk.uri as string, 
-                         title: webChunk.title as string,
-                     }));
-             }
-        }
-
-        if (requiresJson) {
-            if (aiResponseText) {
-                const parsedData = parseJsonFromString<any>(aiResponseText);
-                if (parsedData) {
-                    textToSpeakAndDisplay = "I have some structured data for you."; 
-                    messageData = parsedData;
-                } else {
-                    const trimmedResponse = aiResponseText.trim();
-                    if (trimmedResponse.startsWith('{') || trimmedResponse.startsWith('[')) {
-                        textToSpeakAndDisplay = "I heard you, but I'm having trouble reading the details. Mind saying that again?";
-                    } else if (trimmedResponse) {
-                        textToSpeakAndDisplay = aiResponseText; 
-                    } else {
-                        textToSpeakAndDisplay = "Didn't copy that clearly. Say again?";
-                    }
-                }
-            } else {
-                 textToSpeakAndDisplay = "Didn't get a read on that. Try again?";
-            }
-            handleAiResponseDisplay(textToSpeakAndDisplay, messageData, groundingSources);
-        } else { 
-            textToSpeakAndDisplay = aiResponseText || "Static on the line. Didn't catch that. Once more?";
-            handleAiResponseDisplay(textToSpeakAndDisplay, null, groundingSources);
-        }
-      }
+      handleAiResponseDisplay(aiText);
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      console.error("Error processing user input:", e);
+      console.error("💬 Error processing user input:", e);
       handleAiResponseDisplay(`Having some engine trouble here: ${errorMessage || 'Check your connection.'}`);
     } finally {
       setIsLoadingAI(false);
     }
   }, [
-      addMessageToChat, apiKeyError,
-      generalChatSession,
-      vehicleInspectionSession,
-      handleAiResponseDisplay,
-      isWellnessCheckinActive, handleWellnessCheckinResponse, startWellnessCheckin,
-      isServiceRequestActive, handleServiceRequestResponse,
-      userProfile, isAskingName
+    apiKeyError, generalChatSession, handleAiResponseDisplay,
+    isWellnessCheckinActive, handleWellnessCheckinResponse, startWellnessCheckin,
+    isServiceRequestActive, handleServiceRequestResponse, startServiceRequest,
+    userProfile, isAskingName
   ]);
 
-
   const toggleListen = useCallback(async () => {
-    // Ensure audio context is ready if we plan to speak a response later
     await initializeAudio();
 
     if (isListening) {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      speechRecognitionRef.current?.stop();
+      // Stop listening
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
       setIsListening(false);
     } else {
-      if (isSpeaking && userProfile.voiceOutput.enabled) stopAudioPlayback();
-      
+      // Start listening
+      if (isSpeaking && userProfile.voiceOutput.enabled) {
+        stopAudioPlayback();
+        setIsSpeaking(false);
+      }
+
       const recognition = getSpeechRecognition();
       if (recognition) {
         speechRecognitionRef.current = recognition;
-        // Use continuous=true to manually control stop time via silence detection
+        recognition.lang = userProfile.voiceInput.language;
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = userProfile.voiceInput.language;
-        
+
         transcriptAccumulatorRef.current = '';
 
-        recognition.onstart = () => setIsListening(true);
-        
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript + ' ';
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          if (finalTranscript) {
+            transcriptAccumulatorRef.current += finalTranscript;
+          }
+
+          // Update transcription display
+          const currentTranscript = transcriptAccumulatorRef.current + interimTranscript;
+          setTranscription(currentTranscript);
+
+          // Reset silence timer on new speech
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+          }
+
+          silenceTimerRef.current = setTimeout(() => {
+            if (speechRecognitionRef.current && transcriptAccumulatorRef.current.trim()) {
+              speechRecognitionRef.current.stop();
+              const finalText = transcriptAccumulatorRef.current.trim();
+              processUserInput(finalText);
+              transcriptAccumulatorRef.current = '';
+              setIsListening(false);
+            }
+          }, 1500);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error("Speech recognition error:", event.error);
+          setIsListening(false);
+        };
+
         recognition.onend = () => {
           setIsListening(false);
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-          
-          // When recognition ends, process what we gathered
-          const finalTranscript = transcriptAccumulatorRef.current.trim();
-          if (finalTranscript) {
-              processUserInput(finalTranscript);
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
           }
         };
 
-        recognition.onerror = (event: any) => { 
-          const errorType = event.error || 'unknown';
-          console.error(`Speech recognition error:`, event);
-          
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-
-          let finalUserMessage = 'Audio error.';
-          if (errorType === 'not-allowed') finalUserMessage = 'Mic access denied.';
-          if (errorType === 'no-speech') finalUserMessage = 'No speech detected.';
-          
-          // Don't show system error message for 'no-speech' if we are controlling timeouts manually,
-          // usually cleaner to just stop listening. But we'll leave basic feedback.
-          if (errorType !== 'no-speech') {
-              addMessageToChat('system', finalUserMessage);
-          }
-          setIsListening(false);
-        };
-
-        recognition.onresult = (event: SpeechRecognitionEvent) => { 
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-          
-          // Reset 1.5s timer to stop listening after silence
-          silenceTimerRef.current = setTimeout(() => {
-              recognition.stop();
-          }, 1500);
-
-          let fullTranscript = '';
-          // Concatenate all results as continuous mode may produce multiple segments
-          for (let i = 0; i < event.results.length; ++i) {
-            fullTranscript += event.results[i][0].transcript;
-          }
-          transcriptAccumulatorRef.current = fullTranscript;
-        };
-
+        setIsListening(true);
         recognition.start();
-      } else {
-        addMessageToChat('system', "Speech recognition is not supported in this browser.");
       }
     }
-  }, [isListening, isSpeaking, userProfile, processUserInput, addMessageToChat]);
+  }, [isListening, isSpeaking, userProfile, processUserInput]);
 
-  const handleInputFocus = () => {
-    if (isSpeaking && userProfile.voiceOutput.enabled) stopAudioPlayback();
-  };
-  
-  const handleUserInputChange = (e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value);
+  const handlePDFDownload = async () => {
+    if (!completedServiceRequest) return;
 
-  const handleBookParking = (spot: ParkingSpot) => setActiveModal({ type: 'parkingConfirmation', data: spot });
+    try {
+      const blob = await generateServiceRequestPDF(completedServiceRequest);
+      const filename = `work-order-${completedServiceRequest.urgency}-${completedServiceRequest.id.slice(0, 8)}.pdf`;
+      downloadPDF(blob, filename);
 
-  const confirmParkingBooking = () => {
-    if (activeModal && activeModal.type === 'parkingConfirmation' && activeModal.data) {
-      const spotName = (activeModal.data as ParkingSpot).name;
-      const confirmationText = `10-4. Simulated booking for ${spotName}. Call ahead to confirm.`;
-      addMessageToChat('ai', confirmationText); 
-      speakAiResponse(confirmationText);
-      setActiveModal(null);
+      // Transition to resolution state
+      setTimeout(() => {
+        setCompletedServiceRequest(null);
+        setTranscription('');
+      }, 1000);
+    } catch (error) {
+      console.error('PDF generation failed:', error);
     }
-  };
-
-  const handleSendTypedInput = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await initializeAudio(); 
-    if (isSpeaking && userProfile.voiceOutput.enabled) stopAudioPlayback();
-    if (userInput.trim()) processUserInput(userInput.trim());
   };
 
   const handleSaveSettings = (newProfile: UserProfile) => {
     const languageChanged = newProfile.voiceInput.language !== userProfile.voiceInput.language;
-    
+
     setUserProfile(newProfile);
     saveUserProfile(newProfile);
     setIsSettingsModalOpen(false);
 
     if (languageChanged) {
-        setGeneralChatSession(null);
-        setVehicleInspectionSession(null);
-        addMessageToChat('system', 'Language changed. Resetting chat context.');
-    } else {
-        addMessageToChat('system', 'Settings saved.');
+      setGeneralChatSession(null);
+      setVehicleInspectionSession(null);
     }
 
     if (!newProfile.voiceOutput.enabled && isSpeaking) {
-        stopAudioPlayback();
-        setIsSpeaking(false);
+      stopAudioPlayback();
+      setIsSpeaking(false);
     }
   };
 
-  if (!assistantStarted) {
+  // Settings Page
+  if (currentTab === 'settings') {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-gray-100 p-4">
-        <div className="text-center">
-          <i className="fas fa-truck-moving fa-3x text-blue-400 mb-6"></i>
-          <h1 className="text-4xl font-bold text-blue-400 mb-3">Hey Bib</h1>
-          <p className="text-xl text-gray-300 mb-10">Your AI Trucker Assistant</p>
-          <button
-            onClick={handleStartAssistant}
-            className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg text-lg transition-colors duration-150 flex items-center justify-center space-x-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-            aria-label="Start Assistant"
-          >
-            <i className="fas fa-play-circle"></i>
-            <span>Start Assistant</span>
-          </button>
-        </div>
-      </div>
+      <>
+        <SettingsPage
+          isDark={isDark}
+          onSave={(settings) => {
+            console.log('Settings saved:', settings);
+            // TODO: Save to user profile
+            setCurrentTab('home');
+          }}
+          onCancel={() => {
+            console.log('Settings cancelled');
+            // Optionally navigate back
+          }}
+        />
+        <BottomMenuBar
+          isDark={isDark}
+          onNavigate={(tab) => setCurrentTab(tab)}
+        />
+      </>
     );
   }
 
-  return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
-      <header className="bg-gray-800 shadow-md p-4 flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-blue-400">Bib: Trucker's Voice Assistant</h1>
-        <div className="flex items-center space-x-3">
-          {!isOnline && (
-            <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs">
-              <i className="fa-solid fa-wifi-slash mr-1"></i>
-              Offline
-            </div>
-          )}
-          <IconButton
-              iconClassName="fas fa-cog text-gray-300 hover:text-blue-400"
-              onClick={() => setIsSettingsModalOpen(true)}
-              size="lg"
-              variant="ghost"
-              label="Open Settings"
-              aria-label="Open settings panel"
-          />
-        </div>
-      </header>
-
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-        {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} onBookParking={handleBookParking} />
-        ))}
-        {isLoadingAI && (
-          <div className="flex justify-center py-2">
-            <LoadingSpinner />
-          </div>
-        )}
-        <div ref={chatEndRef} />
-      </main>
-      
-       {assistantStarted && !isLoadingAI && !isListening && !isSpeaking && !isWellnessCheckinActive && !isAskingName && messages.length > 0 && messages[0].sender === 'ai' && messages.filter(m => m.sender === 'user').length === 0 && (
-          <div className="px-4 pb-2 text-sm text-gray-400">
-            <p className="font-semibold mb-1">Try asking:</p>
-            <ul className="list-disc list-inside">
-              {EXAMPLE_COMMANDS.slice(0,3).map(cmd => <li key={cmd}>{cmd}</li>)}
-            </ul>
-          </div>
-        )}
-
-      <footer className="bg-gray-800 p-4 shadow-up">
-        <form onSubmit={handleSendTypedInput} className="flex items-center space-x-3">
-          <input
-            type="text"
-            value={userInput}
-            onChange={handleUserInputChange}
-            onFocus={handleInputFocus}
-            placeholder={isListening ? "Listening..." : (isAskingName ? "Your name..." : (isWellnessCheckinActive ? "Your response..." : "Type or tap mic..."))}
-            className="flex-grow p-3 bg-gray-700 text-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder-gray-500"
-            style={{ fontSize: '16px' }}
-            disabled={isLoadingAI || !!apiKeyError}
-            aria-label="User input"
-          />
-          <IconButton
-            iconClassName={`fas ${isListening ? 'fa-stop-circle text-red-500' : 'fa-microphone text-blue-400'}`}
-            onClick={toggleListen}
-            disabled={isLoadingAI || !!apiKeyError}
-            size="xl"
-            variant="ghost"
-            className={`${isListening ? 'animate-pulse' : ''} ${isLoadingAI ? 'opacity-50 cursor-not-allowed' : ''}`}
-            label={isListening ? "Stop listening" : "Start listening"}
-          />
-           <IconButton
-            type="submit"
-            iconClassName="fas fa-paper-plane text-green-400"
-            disabled={isListening || isLoadingAI || !userInput.trim() || !!apiKeyError}
-            size="xl"
-            variant="ghost"
-            className={`${isListening || isLoadingAI || !userInput.trim() || !!apiKeyError ? 'opacity-50 cursor-not-allowed' : ''}`}
-            label="Send typed message"
-          />
-        </form>
-         {apiKeyError && <p className="text-red-500 text-xs text-center mt-2">{apiKeyError}</p>}
-      </footer>
-
-      {activeModal && activeModal.type === 'parkingConfirmation' && activeModal.data && (
-        <Modal
-          isOpen={!!activeModal}
-          onClose={() => setActiveModal(null)}
-          title={`Confirm Parking at ${(activeModal.data as ParkingSpot).name}?`}
+  // Start screen
+  if (!assistantStarted) {
+    return (
+      <>
+        <div
+          className="flex flex-col items-center justify-center h-screen"
+          style={{
+            background: isDark ? '#000000' : '#F2F2F7'
+          }}
+          onClick={handleStartAssistant}
         >
-          <p><span className="font-semibold">Name:</span> {(activeModal.data as ParkingSpot).name}</p>
-          <p><span className="font-semibold">Location:</span> {(activeModal.data as ParkingSpot).location}</p>
-          <p><span className="font-semibold">Security:</span> {(activeModal.data as ParkingSpot).security_features.join(', ')}</p>
-          <p><span className="font-semibold">Availability:</span> {(activeModal.data as ParkingSpot).availability}</p>
-          <p className="mt-4 text-sm text-yellow-400">Note: This is a simulation. Always verify.</p>
-          <div className="mt-6 flex justify-end space-x-3">
-            <button onClick={() => setActiveModal(null)} className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-gray-200 rounded-md transition-colors">Cancel</button>
-            <button onClick={confirmParkingBooking} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors">Simulate Booking</button>
+          <div className="text-center">
+            <div
+              style={{
+                fontSize: '72px',
+                marginBottom: '24px',
+                color: 'var(--accent-blue)'
+              }}
+            >
+              🚛
+            </div>
+            <h1
+              style={{
+                fontSize: '34px',
+                fontWeight: 'var(--font-weight-bold)',
+                color: 'var(--label-primary)',
+                marginBottom: '12px'
+              }}
+            >
+              Hey Bib
+            </h1>
+            <p
+              style={{
+                fontSize: '20px',
+                color: 'var(--label-secondary)',
+                marginBottom: '40px'
+              }}
+            >
+              Your Voice Assistant
+            </p>
+            <div
+              style={{
+                fontSize: '15px',
+                color: 'var(--label-tertiary)',
+                cursor: 'pointer'
+              }}
+            >
+              Tap anywhere to start
+            </div>
           </div>
-        </Modal>
+        </div>
+
+        {/* Bottom Menu Bar - Persistent across all pages */}
+        <BottomMenuBar
+          isDark={isDark}
+          onNavigate={(tab) => {
+            setCurrentTab(tab);
+          }}
+        />
+      </>
+    );
+  }
+
+  // Main voice UI
+  return (
+    <div
+      onClick={() => {
+        if (!isLoadingAI && !apiKeyError && !isSpeaking) {
+          toggleListen();
+        }
+      }}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100vh',
+        overflow: 'hidden',
+        cursor: isLoadingAI || !!apiKeyError ? 'not-allowed' : 'pointer'
+      }}
+    >
+      {/* Offline Indicator */}
+      {!isOnline && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '32px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '8px 16px',
+            borderRadius: '999px',
+            background: isDark ? 'rgba(255, 69, 58, 0.9)' : 'rgba(255, 59, 48, 0.9)',
+            color: '#FFFFFF',
+            fontSize: '14px',
+            fontWeight: 'var(--font-weight-medium)',
+            zIndex: 100,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Offline
+        </div>
       )}
 
+      {/* Voice UI States */}
+      {assistantState === 'idle' && <IdleState isDark={isDark} />}
+      {assistantState === 'listening' && <ListeningState isDark={isDark} transcription={transcription} />}
+      {assistantState === 'processing' && <ProcessingState isDark={isDark} transcription={transcription} />}
+      {assistantState === 'responding' && <RespondingState isDark={isDark} transcription={transcription} isComplete={isResponseComplete} />}
+      {assistantState === 'urgent' && <UrgentResponseState isDark={isDark} transcription={transcription} />}
+      {assistantState === 'resolution' && <ResolutionState isDark={isDark} />}
+      {assistantState === 'pdf-generating' && <PDFGeneratingState isDark={isDark} documentName="Work Order" />}
+      {assistantState === 'pdf-ready' && completedServiceRequest && (
+        <PDFReadyState
+          isDark={isDark}
+          serviceRequest={completedServiceRequest}
+          onDownload={handlePDFDownload}
+        />
+      )}
+
+      {/* Modals */}
       {isSettingsModalOpen && (
         <SettingsModal
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           currentProfile={userProfile}
           onSave={handleSaveSettings}
-          availableVoices={availableVoices} 
+          availableVoices={availableVoices}
         />
       )}
+
+      {activeModal?.type === 'parkingConfirmation' && (
+        <Modal isOpen={true} onClose={() => setActiveModal(null)} title="Confirm Booking">
+          <p className="mb-4">Book parking at {(activeModal.data as ParkingSpot).name}?</p>
+          <div className="flex justify-end space-x-2">
+            <button onClick={() => setActiveModal(null)} className="px-4 py-2 bg-gray-600 rounded">
+              Cancel
+            </button>
+            <button onClick={() => {
+              const spotName = (activeModal.data as ParkingSpot).name;
+              speakAiResponse(`10-4. Simulated booking for ${spotName}. Call ahead to confirm.`);
+              setActiveModal(null);
+            }} className="px-4 py-2 bg-blue-600 rounded">
+              Confirm
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Bottom Menu Bar */}
+      <BottomMenuBar
+        isDark={isDark}
+        onNavigate={(tab) => {
+          if (tab === 'home') {
+            // Reset to startup page
+            setAssistantStarted(false);
+            setIsListening(false);
+            setIsSpeaking(false);
+            setIsLoadingAI(false);
+            setTranscription('');
+            stopAudioPlayback();
+          }
+          setCurrentTab(tab);
+        }}
+      />
     </div>
   );
 };

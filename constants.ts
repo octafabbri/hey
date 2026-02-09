@@ -19,6 +19,8 @@ export const SYSTEM_INSTRUCTIONS: Record<AssistantTask, string> = {
   [AssistantTask.MENTAL_WELLNESS_STRESS_REDUCTION]: "You're here to help {{USERNAME}} unwind. If they're driving, suggest something safe like deep breaths or listening to music. If they're parked, maybe a walk or some downtime. Keep it chill and supportive. Plain text only. Don't start every sentence with their name.",
   [AssistantTask.SERVICE_REQUEST]: `You are Bib, an AI dispatcher for an emergency roadside assistance company. You're helping {{USERNAME}} create a work order for our technicians.
 
+CRITICAL: ALL truck and trailer service requests require a complete work order with urgency classification - this includes fuel delivery, tire service, mechanical repair, towing, jump starts, and lockouts. You MUST collect all required information for EVERY request.
+
 IMPORTANT: You are part of the dispatch team. DO NOT search for or recommend external services. Your job is ONLY to collect information so our technicians can be dispatched.
 
 REQUIRED INFORMATION TO COLLECT (ALL FIELDS MANDATORY):
@@ -43,27 +45,37 @@ REQUIRED INFORMATION TO COLLECT (ALL FIELDS MANDATORY):
 
 5. Problem Description: What happened? Get brief but clear details about the issue
 
-6. Urgency: Determine from context using CAREFUL JUDGMENT:
+6. Urgency: Determine from context using CAREFUL JUDGMENT (location is key):
 
-   ERS (Emergency Road Service) - ONLY for TRUE EMERGENCIES:
-   - Vehicle is STUCK in an UNSAFE location: highway shoulder, blocking traffic, breakdown lane
-   - Completely immobile in a vulnerable/dangerous spot
-   - User explicitly says "emergency", "urgent", "right now", "ASAP"
+   ERS (Emergency Road Service) - For UNSAFE LOCATIONS:
+   - Vehicle stuck on: highway shoulder, breakdown lane, blocking traffic, interstate, on-ramp
+   - Out of fuel on highway or road (cannot move safely)
+   - Breakdown in unsafe location that requires immediate assistance
+   - User explicitly says "emergency", "urgent", "right now", "ASAP", "stranded"
 
-   SCHEDULED (Appointment Service) - For NON-URGENT situations:
-   - Vehicle is in a SAFE location: parking lot, truck stop, home, shop
-   - Service can wait (tire replacement at a safe location, scheduled maintenance)
+   SCHEDULED (Appointment Service) - For SAFE LOCATIONS:
+   - Vehicle at: truck stop, parking lot, rest area, home, shop, safe pullout
+   - Out of fuel at a safe location (can wait for delivery)
+   - Tire service at safe location, scheduled maintenance
    - User mentions: "schedule", "appointment", "when can you", future dates
-   - Ask naturally: "When would work best for you?" or "Want me to schedule this?"
+   - **REQUIRED FOR SCHEDULED:** Collect appointment details:
+     * Preferred DATE (e.g., "Next Monday", "February 15th", specific date)
+     * Preferred TIME (e.g., "Morning", "2:00 PM", "afternoon")
+     * SERVICE LOCATION (confirm where service should happen - current location or different address)
+   - Ask naturally: "When would work best for you?" or "What date and time works for the service?"
 
    DELAYED (Next Day):
    - User explicitly says "tomorrow", "tomorrow morning", "next day"
 
+   URGENCY DECISION RULE: Location determines urgency!
+   - Unsafe location (highway/road) = ERS
+   - Safe location (parking lot/truck stop) = ask "Need this today or can we schedule?"
+
    CLARIFICATION STRATEGY:
-   - If location is safe AND service isn't life-threatening, ask about timing naturally:
+   - If location is safe, ask about timing naturally:
      * "When do you need this done? Today or could we schedule it?"
      * "Does this need to happen right away, or can we set up an appointment?"
-   - DO NOT default everything to emergency - many situations can be scheduled!
+   - DO NOT default everything to emergency - fuel delivery at a truck stop can be scheduled!
 
 CONVERSATION STYLE:
 - Continue naturally from the safe spot question (already asked initially)
@@ -93,11 +105,37 @@ export const EXAMPLE_COMMANDS = [
 
 // Keywords for service request coordination
 export const SERVICE_REQUEST_KEYWORDS = [
-  "break down", "broke down", "breakdown",
-  "tow truck", "towing", "need a tow",
-  "flat tire", "tire change", "blowout",
-  "jump start", "battery dead", "won't start",
-  "help", "emergency", "stranded", "roadside assistance"
+  // Breakdowns & Towing
+  "break down", "broke down", "breakdown", "broken down",
+  "tow truck", "towing", "need a tow", "need tow",
+  "stranded", "stuck", "can't move", "won't move",
+
+  // Tire Issues
+  "flat tire", "tire change", "blowout", "tire repair", "tire service",
+  "puncture", "tire blew", "tire flat",
+
+  // Battery & Starting
+  "jump start", "battery dead", "won't start", "dead battery",
+  "battery died", "car won't start", "truck won't start",
+
+  // Fuel Delivery
+  "fuel delivery", "out of fuel", "out of gas", "out of diesel",
+  "need fuel", "need gas", "need diesel", "ran out of fuel",
+
+  // Lockout
+  "locked out", "keys locked", "lost keys", "keys inside",
+
+  // Mechanical/Repair
+  "mechanic", "repair", "mechanical", "engine problem", "engine issue",
+  "overheating", "smoking", "leaking", "won't drive",
+
+  // Vehicle-specific (triggers service request for truck/trailer issues)
+  "my truck", "my trailer", "truck needs", "trailer needs",
+  "tractor needs", "rig needs", "semi needs",
+
+  // General
+  "emergency", "roadside assistance", "road service", "need service",
+  "need help with truck", "need help with trailer"
 ];
 
 export const TASK_KEYWORDS: { keywords: string[]; task: AssistantTask, requiresJson?: boolean }[] = [

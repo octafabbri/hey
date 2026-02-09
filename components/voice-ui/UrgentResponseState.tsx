@@ -38,7 +38,7 @@ export function UrgentResponseState({ isDark, transcription = '' }: UrgentRespon
               style={{
                 background: isDark
                   ? 'radial-gradient(circle, rgba(94, 159, 255, 0.45) 0%, transparent 68%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, transparent 68%)',
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.52) 0%, transparent 68%)',
                 filter: 'blur(18px)',
               }}
             />
@@ -59,10 +59,10 @@ export function UrgentResponseState({ isDark, transcription = '' }: UrgentRespon
               className="absolute inset-0 m-auto w-20 h-20 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.8) 0%, rgba(94, 159, 255, 0.35) 100%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.7) 0%, rgba(94, 159, 255, 0.28) 100%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.8) 0%, rgba(94, 159, 255, 0.52) 100%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.7) 0%, rgba(94, 159, 255, 0.42) 100%)',
                 boxShadow: isDark
-                  ? '0 0 32px rgba(94, 159, 255, 0.5), inset 0 0 16px rgba(94, 159, 255, 0.4)'
+                  ? '0 0 32px rgba(94, 159, 255, 0.68), inset 0 0 16px rgba(94, 159, 255, 0.4)'
                   : '0 0 28px rgba(94, 159, 255, 0.4), inset 0 0 14px rgba(94, 159, 255, 0.32)',
               }}
             />

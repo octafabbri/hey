@@ -106,6 +106,23 @@ export const extractNameWithAI = async (userInput: string): Promise<string> => {
  * Generate speech using OpenAI TTS
  * Returns base64-encoded audio data
  */
+/**
+ * Convert ArrayBuffer to base64 string using chunked processing
+ * to avoid stack overflow with large audio files
+ */
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000; // 32KB chunks
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+};
+
 export const generateSpeech = async (text: string, voiceName: string = 'onyx'): Promise<string | null> => {
   try {
     // Validate and map voice names (handle old Gemini voices from localStorage)
@@ -122,12 +139,10 @@ export const generateSpeech = async (text: string, voiceName: string = 'onyx'): 
       response_format: 'mp3',
     });
 
-    // Convert response to base64
+    // Convert response to base64 using chunked processing
     const arrayBuffer = await response.arrayBuffer();
     console.log(`✅ Received audio buffer: ${arrayBuffer.byteLength} bytes`);
-    const base64Audio = btoa(
-      String.fromCharCode(...new Uint8Array(arrayBuffer))
-    );
+    const base64Audio = arrayBufferToBase64(arrayBuffer);
 
     console.log(`✅ Base64 audio length: ${base64Audio.length} chars`);
     return base64Audio;
@@ -285,8 +300,15 @@ Return JSON with ALL extracted fields. Include fields even if partially complete
     "model": "string",
     "year": "string",
     "unit_number": "string"
+  },
+  "scheduled_appointment": {
+    "scheduled_date": "string - e.g., 'Next Monday', 'February 15th', '2025-02-15'",
+    "scheduled_time": "string - e.g., 'Morning', '2:00 PM', 'afternoon'",
+    "scheduled_location": "string - where service should happen (current location or different address)"
   }
 }
+
+IMPORTANT: Only include "scheduled_appointment" field if urgency is "SCHEDULED". Otherwise omit it.
 
 Return ONLY the JSON object, no other text.`;
 

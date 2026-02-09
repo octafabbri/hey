@@ -38,8 +38,8 @@ export function RespondingState({ isDark, transcription = '', isComplete = false
               className="absolute inset-0 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.3) 0%, transparent 65%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.22) 0%, transparent 65%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.45) 0%, transparent 65%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, transparent 65%)',
                 filter: 'blur(18px)',
               }}
             />
@@ -49,8 +49,8 @@ export function RespondingState({ isDark, transcription = '', isComplete = false
               className="absolute inset-0 m-auto w-24 h-24 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.38) 0%, transparent 75%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.28) 0%, transparent 75%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.55) 0%, transparent 75%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.45) 0%, transparent 75%)',
                 filter: 'blur(12px)',
               }}
             />
@@ -60,11 +60,11 @@ export function RespondingState({ isDark, transcription = '', isComplete = false
               className="absolute inset-0 m-auto w-20 h-20 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.62) 0%, rgba(94, 159, 255, 0.24) 100%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.52) 0%, rgba(94, 159, 255, 0.19) 100%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.8) 0%, rgba(94, 159, 255, 0.38) 100%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.7) 0%, rgba(94, 159, 255, 0.32) 100%)',
                 boxShadow: isDark
-                  ? '0 0 28px rgba(94, 159, 255, 0.35), inset 0 0 14px rgba(94, 159, 255, 0.28)'
-                  : '0 0 24px rgba(94, 159, 255, 0.27), inset 0 0 12px rgba(94, 159, 255, 0.22)',
+                  ? '0 0 36px rgba(94, 159, 255, 0.55), inset 0 0 18px rgba(94, 159, 255, 0.45)'
+                  : '0 0 32px rgba(94, 159, 255, 0.45), inset 0 0 16px rgba(94, 159, 255, 0.38)',
               }}
             />
           </div>

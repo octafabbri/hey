@@ -69,6 +69,23 @@ export const validateServiceRequest = (request: ServiceRequest): {
     missingFields.push('vehicle.year');
   }
 
+  // Required fields - Scheduled Appointment (only for SCHEDULED urgency)
+  if (request.urgency === 'SCHEDULED') {
+    if (!request.scheduled_appointment) {
+      missingFields.push('scheduled_appointment');
+    } else {
+      if (!request.scheduled_appointment.scheduled_date || request.scheduled_appointment.scheduled_date.trim() === '') {
+        missingFields.push('scheduled_appointment.scheduled_date');
+      }
+      if (!request.scheduled_appointment.scheduled_time || request.scheduled_appointment.scheduled_time.trim() === '') {
+        missingFields.push('scheduled_appointment.scheduled_time');
+      }
+      if (!request.scheduled_appointment.scheduled_location || request.scheduled_appointment.scheduled_location.trim() === '') {
+        missingFields.push('scheduled_appointment.scheduled_location');
+      }
+    }
+  }
+
   return {
     isComplete: missingFields.length === 0,
     missingFields,

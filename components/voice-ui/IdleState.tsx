@@ -10,8 +10,8 @@ export function IdleState({ isDark }: IdleStateProps) {
       className="fixed inset-0 flex flex-col items-center justify-center"
       style={{
         background: isDark
-          ? 'radial-gradient(circle at center, rgba(94, 159, 255, 0.03) 0%, transparent 50%)'
-          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.02) 0%, transparent 50%)',
+          ? 'radial-gradient(circle at center, rgba(94, 159, 255, 0.05) 0%, transparent 50%)'
+          : 'radial-gradient(circle at center, rgba(94, 159, 255, 0.04) 0%, transparent 50%)',
       }}
     >
       {/* Main Content Area - Centered Orb */}
@@ -36,8 +36,8 @@ export function IdleState({ isDark }: IdleStateProps) {
               className="absolute inset-0 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.18) 0%, transparent 70%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.12) 0%, transparent 70%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, transparent 70%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.25) 0%, transparent 70%)',
                 filter: 'blur(16px)',
               }}
             />
@@ -47,11 +47,11 @@ export function IdleState({ isDark }: IdleStateProps) {
               className="absolute inset-0 m-auto w-20 h-20 rounded-full"
               style={{
                 background: isDark
-                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.35) 0%, rgba(94, 159, 255, 0.12) 100%)'
-                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.28) 0%, rgba(94, 159, 255, 0.1) 100%)',
+                  ? 'radial-gradient(circle, rgba(94, 159, 255, 0.65) 0%, rgba(94, 159, 255, 0.3) 100%)'
+                  : 'radial-gradient(circle, rgba(94, 159, 255, 0.55) 0%, rgba(94, 159, 255, 0.25) 100%)',
                 boxShadow: isDark
-                  ? '0 0 24px rgba(94, 159, 255, 0.2), inset 0 0 12px rgba(94, 159, 255, 0.15)'
-                  : '0 0 20px rgba(94, 159, 255, 0.15), inset 0 0 10px rgba(94, 159, 255, 0.12)',
+                  ? '0 0 32px rgba(94, 159, 255, 0.4), inset 0 0 16px rgba(94, 159, 255, 0.3)'
+                  : '0 0 28px rgba(94, 159, 255, 0.35), inset 0 0 14px rgba(94, 159, 255, 0.25)',
               }}
             />
           </div>
