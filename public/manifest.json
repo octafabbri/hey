@@ -1,6 +1,6 @@
 {
-  "name": "Hey Bib - Truck Services",
-  "short_name": "HeyBib",
+  "name": "Mr. Roboto - Truck Services",
+  "short_name": "Mr. Roboto",
   "description": "Voice-activated roadside assistance coordination",
   "start_url": "/",
   "display": "standalone",

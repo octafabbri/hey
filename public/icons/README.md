@@ -6,7 +6,7 @@ This directory should contain the following icon files for the Progressive Web A
 
 1. **icon-192.png** - 192x192 pixels
    - Used for mobile home screen icon
-   - Should feature "Hey Bib" branding
+   - Should feature "Mr. Roboto" branding
    - Recommended: Blue background (#3b82f6) with white truck/microphone icon
 
 2. **icon-512.png** - 512x512 pixels
@@ -28,7 +28,7 @@ You can create these icons using:
 - **Background Color**: #3b82f6 (blue - matches app theme)
 - **Icon Color**: White or light gray
 - **Symbol**: Truck with microphone, or just a microphone icon
-- **Text**: "Bib" or "HB" (Hey Bib)
+- **Text**: "Mr. Roboto" or "MR"
 - **Style**: Simple, flat design for visibility at small sizes
 - **Format**: PNG with transparency (though background should be solid)
 

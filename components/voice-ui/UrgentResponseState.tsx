@@ -74,7 +74,7 @@ export function UrgentResponseState({ isDark, transcription = '' }: UrgentRespon
       <div
         className="w-full px-8 pb-16"
         style={{
-          paddingBottom: 'max(env(safe-area-inset-bottom, 0px) + 64px, 64px)',
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px) + 140px, 140px)',
         }}
       >
         <div

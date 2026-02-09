@@ -12,6 +12,8 @@ import { PDFGeneratingState } from './components/voice-ui/PDFGeneratingState';
 import { PDFReadyState } from './components/voice-ui/PDFReadyState';
 import { BottomMenuBar } from './components/BottomMenuBar';
 import { SettingsPage } from './components/SettingsPage';
+import { InputModeToggle } from './components/InputModeToggle';
+import { ChatInterface, ChatMessage } from './components/ChatInterface';
 import { getSpeechRecognition, playAudioContent, stopAudioPlayback, initializeAudio, SpeechRecognition, SpeechRecognitionEvent } from './services/speechService';
 import { determineTaskFromInput, startVehicleInspectionChat, continueVehicleInspectionChat, createNewChatWithTask, extractNameWithAI, generateSpeech, extractServiceDataFromConversation, ChatSession } from './services/aiService';
 import { API_KEY_ERROR_MESSAGE, WELLNESS_CHECKIN_KEYWORDS, WELLNESS_CHECKIN_QUESTIONS, OPENAI_VOICES, SERVICE_REQUEST_KEYWORDS } from './constants';
@@ -21,6 +23,7 @@ import { generateServiceRequestPDF, downloadPDF } from './services/pdfService';
 
 type AssistantState = 'idle' | 'listening' | 'processing' | 'responding' | 'urgent' | 'resolution' | 'pdf-generating' | 'pdf-ready';
 type NavigationTab = 'home' | 'contacts' | 'settings';
+type InputMode = 'voice' | 'chat';
 
 const App: React.FC = () => {
   // Voice-First UI State
@@ -29,6 +32,7 @@ const App: React.FC = () => {
   const [isResponseComplete, setIsResponseComplete] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
+  const [inputMode, setInputMode] = useState<InputMode>('voice');
 
   // Core Assistant State
   const [isListening, setIsListening] = useState(false);
@@ -60,6 +64,9 @@ const App: React.FC = () => {
   const [activeServiceRequest, setActiveServiceRequest] = useState<ServiceRequest | null>(null);
   const [serviceRequestSession, setServiceRequestSession] = useState<ChatSession | null>(null);
   const [completedServiceRequest, setCompletedServiceRequest] = useState<ServiceRequest | null>(null);
+
+  // Chat History (shared between voice and chat modes)
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Offline Detection
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -192,6 +199,18 @@ const App: React.FC = () => {
     return "Hey there";
   }, []);
 
+  // Add message to chat history
+  const addMessage = useCallback((sender: 'user' | 'ai' | 'system', text: string, data?: any) => {
+    const newMessage: ChatMessage = {
+      id: Date.now().toString() + Math.random(),
+      sender,
+      text,
+      timestamp: new Date(),
+      ...(data && { data }),
+    };
+    setMessages((prev) => [...prev, newMessage]);
+  }, []);
+
   const handleStartAssistant = async () => {
     try {
       await initializeAudio();
@@ -208,15 +227,17 @@ const App: React.FC = () => {
     // Time-based greeting
     const timeGreeting = getTimeBasedGreeting();
     const greeting = userProfile.userName
-      ? `${timeGreeting}, ${userProfile.userName}! This is Bib. What can I help you with?`
-      : `${timeGreeting}! This is Bib. How can I help you today?`;
+      ? `${timeGreeting}, ${userProfile.userName}! This is Mr. Roboto. What can I help you with?`
+      : `${timeGreeting}! This is Mr. Roboto. How can I help you today?`;
 
+    addMessage('ai', greeting);
     speakAiResponse(greeting);
   };
 
   const handleAiResponseDisplay = useCallback((text: string) => {
+    addMessage('ai', text);
     speakAiResponse(text);
-  }, [speakAiResponse]);
+  }, [speakAiResponse, addMessage]);
 
   const startWellnessCheckin = useCallback(() => {
     setIsWellnessCheckinActive(true);
@@ -224,8 +245,9 @@ const App: React.FC = () => {
     setPendingMoodEntry({ timestamp: new Date() });
     const firstQuestion = WELLNESS_CHECKIN_QUESTIONS[0];
     const questionText = `${firstQuestion.questionText} ${firstQuestion.scale || ''}`;
+    addMessage('ai', questionText);
     speakAiResponse(questionText);
-  }, [speakAiResponse]);
+  }, [speakAiResponse, addMessage]);
 
   const handleWellnessCheckinResponse = useCallback((responseText: string) => {
     if (!pendingMoodEntry || wellnessCheckinStep >= WELLNESS_CHECKIN_QUESTIONS.length) return;
@@ -245,6 +267,7 @@ const App: React.FC = () => {
       setWellnessCheckinStep(nextStep);
       const nextQuestion = WELLNESS_CHECKIN_QUESTIONS[nextStep];
       const questionPrompt = `${nextQuestion.questionText} ${nextQuestion.scale || ''}`;
+      addMessage('ai', questionPrompt);
       speakAiResponse(questionPrompt);
     } else {
       const finalEntry = { ...pendingMoodEntry, timestamp: pendingMoodEntry.timestamp || new Date() } as MoodEntry;
@@ -253,12 +276,13 @@ const App: React.FC = () => {
       saveUserProfile(updatedProfile);
 
       const ackMsg = "Thanks for sharing. I've logged that for you. Stay safe out there.";
+      addMessage('ai', ackMsg);
       speakAiResponse(ackMsg);
       setIsWellnessCheckinActive(false);
       setWellnessCheckinStep(0);
       setPendingMoodEntry(null);
     }
-  }, [pendingMoodEntry, wellnessCheckinStep, userProfile, speakAiResponse]);
+  }, [pendingMoodEntry, wellnessCheckinStep, userProfile, speakAiResponse, addMessage]);
 
   // Service Request Functions
   const startServiceRequest = useCallback(() => {
@@ -276,8 +300,9 @@ const App: React.FC = () => {
     setServiceRequestSession(session);
 
     const greeting = "Copy that, I'm here to help. First, are you in a safe spot?";
+    addMessage('ai', greeting);
     speakAiResponse(greeting);
-  }, [userProfile, speakAiResponse]);
+  }, [userProfile, speakAiResponse, addMessage]);
 
   const handleServiceRequestResponse = useCallback(async (text: string) => {
     if (!serviceRequestSession || !activeServiceRequest) return;
@@ -318,38 +343,42 @@ const App: React.FC = () => {
       console.log('🚨 Updated request:', updatedRequest);
 
       if (validation.isComplete) {
-        console.log('🚨 SERVICE REQUEST COMPLETE - Generating PDF');
+        console.log('🚨 SERVICE REQUEST COMPLETE - Ready to download');
         // Mark as submitted and save
         updatedRequest.status = 'submitted';
         const updatedProfile = addServiceRequest(userProfile, updatedRequest);
         setUserProfile(updatedProfile);
         saveUserProfile(updatedProfile);
 
-        // Transition to PDF generating
-        const completionMsg = `Got everything. Generating your work order now.`;
+        // Show completion message with download button
+        const completionMsg = `Got everything. Your work order is ready to download.`;
+        addMessage('ai', completionMsg, updatedRequest);
         speakAiResponse(completionMsg);
 
-        // Wait for speech to complete, then generate PDF (longer delay to ensure speech finishes)
-        setTimeout(async () => {
-          setIsServiceRequestActive(false);
-          setActiveServiceRequest(null);
-          setCompletedServiceRequest(updatedRequest);
-        }, 5000);
+        // Clean up state
+        setIsServiceRequestActive(false);
+        setActiveServiceRequest(null);
       } else {
         console.log('🚨 SERVICE REQUEST INCOMPLETE - Missing:', validation.missingFields);
         // Continue conversation
+        addMessage('ai', aiText);
         speakAiResponse(aiText);
       }
     } catch (error) {
       console.error("Service request error:", error);
-      speakAiResponse("Error processing request. Please try again.");
+      const errorMsg = "Error processing request. Please try again.";
+      addMessage('ai', errorMsg);
+      speakAiResponse(errorMsg);
     } finally {
       setIsLoadingAI(false);
     }
-  }, [serviceRequestSession, activeServiceRequest, userProfile, speakAiResponse]);
+  }, [serviceRequestSession, activeServiceRequest, userProfile, speakAiResponse, addMessage]);
 
   const processUserInput = useCallback(async (text: string) => {
     if (!text.trim()) return;
+
+    // Add user message to chat history
+    addMessage('user', text);
 
     // Update transcription
     setTranscription(text);
@@ -529,6 +558,13 @@ const App: React.FC = () => {
     }
   }, [isListening, isSpeaking, userProfile, processUserInput]);
 
+  // Handle sending messages from chat interface
+  const handleChatSend = useCallback((message: string) => {
+    if (!message.trim()) return;
+    // Process the message through the same voice input pipeline
+    processUserInput(message);
+  }, [processUserInput]);
+
   const handlePDFDownload = async () => {
     if (!completedServiceRequest) return;
 
@@ -571,14 +607,29 @@ const App: React.FC = () => {
       <>
         <SettingsPage
           isDark={isDark}
+          currentVoice={userProfile.voiceOutput.voiceURI || 'onyx'}
+          currentLanguage={userProfile.voiceInput.language}
           onSave={(settings) => {
             console.log('Settings saved:', settings);
-            // TODO: Save to user profile
+            // Update user profile with new voice and language settings
+            const updatedProfile = {
+              ...userProfile,
+              voiceOutput: {
+                ...userProfile.voiceOutput,
+                voiceURI: settings.voicePersona,
+              },
+              voiceInput: {
+                ...userProfile.voiceInput,
+                language: settings.language,
+              },
+            };
+            setUserProfile(updatedProfile);
+            saveUserProfile(updatedProfile);
             setCurrentTab('home');
           }}
           onCancel={() => {
             console.log('Settings cancelled');
-            // Optionally navigate back
+            setCurrentTab('home');
           }}
         />
         <BottomMenuBar
@@ -618,7 +669,7 @@ const App: React.FC = () => {
                 marginBottom: '12px'
               }}
             >
-              Hey Bib
+              Mr. Roboto
             </h1>
             <p
               style={{
@@ -690,19 +741,43 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Voice UI States */}
-      {assistantState === 'idle' && <IdleState isDark={isDark} />}
-      {assistantState === 'listening' && <ListeningState isDark={isDark} transcription={transcription} />}
-      {assistantState === 'processing' && <ProcessingState isDark={isDark} transcription={transcription} />}
-      {assistantState === 'responding' && <RespondingState isDark={isDark} transcription={transcription} isComplete={isResponseComplete} />}
-      {assistantState === 'urgent' && <UrgentResponseState isDark={isDark} transcription={transcription} />}
-      {assistantState === 'resolution' && <ResolutionState isDark={isDark} />}
-      {assistantState === 'pdf-generating' && <PDFGeneratingState isDark={isDark} documentName="Work Order" />}
-      {assistantState === 'pdf-ready' && completedServiceRequest && (
-        <PDFReadyState
+      {/* Input Mode Toggle - Voice/Chat switcher */}
+      {currentTab === 'home' && (
+        <InputModeToggle
           isDark={isDark}
-          serviceRequest={completedServiceRequest}
-          onDownload={handlePDFDownload}
+          mode={inputMode}
+          onModeChange={setInputMode}
+        />
+      )}
+
+      {/* Voice UI States */}
+      {currentTab === 'home' && inputMode === 'voice' && (
+        <>
+          {assistantState === 'idle' && <IdleState isDark={isDark} />}
+          {assistantState === 'listening' && <ListeningState isDark={isDark} transcription={transcription} />}
+          {assistantState === 'processing' && <ProcessingState isDark={isDark} transcription={transcription} />}
+          {assistantState === 'responding' && <RespondingState isDark={isDark} transcription={transcription} isComplete={isResponseComplete} />}
+          {assistantState === 'urgent' && <UrgentResponseState isDark={isDark} transcription={transcription} />}
+          {assistantState === 'resolution' && <ResolutionState isDark={isDark} />}
+          {assistantState === 'pdf-generating' && <PDFGeneratingState isDark={isDark} documentName="Work Order" />}
+          {assistantState === 'pdf-ready' && completedServiceRequest && (
+            <PDFReadyState
+              isDark={isDark}
+              serviceRequest={completedServiceRequest}
+              onDownload={handlePDFDownload}
+            />
+          )}
+        </>
+      )}
+
+      {/* Chat Interface */}
+      {currentTab === 'home' && inputMode === 'chat' && (
+        <ChatInterface
+          isDark={isDark}
+          messages={messages}
+          onSendMessage={handleChatSend}
+          onSwitchToVoice={() => setInputMode('voice')}
+          isAIResponding={isLoadingAI}
         />
       )}
 

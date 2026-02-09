@@ -5,18 +5,20 @@ export const loadUserProfile = (): UserProfile => {
   try {
     const serializedProfile = localStorage.getItem(USER_PROFILE_STORAGE_KEY);
     if (serializedProfile === null) {
-      return { ...DEFAULT_USER_PROFILE, moodHistory: [] };
+      return { ...DEFAULT_USER_PROFILE, moodHistory: [], serviceRequests: [] };
     }
     const storedProfile = JSON.parse(serializedProfile);
-    // Ensure moodHistory is an array and other parts are spread with defaults
+    // Ensure moodHistory and serviceRequests are arrays and merge with defaults
     return {
+        userName: storedProfile.userName,
         voiceOutput: { ...DEFAULT_USER_PROFILE.voiceOutput, ...storedProfile.voiceOutput },
         voiceInput: { ...DEFAULT_USER_PROFILE.voiceInput, ...storedProfile.voiceInput },
         moodHistory: Array.isArray(storedProfile.moodHistory) ? storedProfile.moodHistory : [],
+        serviceRequests: Array.isArray(storedProfile.serviceRequests) ? storedProfile.serviceRequests : [],
     };
   } catch (error) {
     console.error('Error loading user profile from localStorage:', error);
-    return { ...DEFAULT_USER_PROFILE, moodHistory: [] };
+    return { ...DEFAULT_USER_PROFILE, moodHistory: [], serviceRequests: [] };
   }
 };
 

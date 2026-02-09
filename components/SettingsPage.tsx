@@ -4,18 +4,20 @@ import { OPENAI_VOICES } from '../constants';
 
 interface SettingsPageProps {
   isDark: boolean;
+  currentVoice?: string;
+  currentLanguage?: string;
   onSave?: (settings: { voicePersona: string; language: string }) => void;
   onCancel?: () => void;
 }
 
-export function SettingsPage({ isDark, onSave, onCancel }: SettingsPageProps) {
-  // Original values (simulating loaded from storage)
-  const [originalVoice] = useState('onyx');
-  const [originalLanguage] = useState('en-US');
+export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 'en-US', onSave, onCancel }: SettingsPageProps) {
+  // Original values (from userProfile)
+  const [originalVoice] = useState(currentVoice);
+  const [originalLanguage] = useState(currentLanguage);
 
   // Current values being edited
-  const [selectedVoice, setSelectedVoice] = useState('onyx');
-  const [selectedLanguage, setSelectedLanguage] = useState('en-US');
+  const [selectedVoice, setSelectedVoice] = useState(currentVoice);
+  const [selectedLanguage, setSelectedLanguage] = useState(currentLanguage);
 
   // Track if there are unsaved changes
   const hasChanges = selectedVoice !== originalVoice || selectedLanguage !== originalLanguage;
@@ -166,7 +168,14 @@ export function SettingsPage({ isDark, onSave, onCancel }: SettingsPageProps) {
               }}
             >
               {voicePersonas.map((persona) => (
-                <option key={persona.id} value={persona.id}>
+                <option
+                  key={persona.id}
+                  value={persona.id}
+                  style={{
+                    fontSize: '17px',
+                    padding: '12px 16px',
+                  }}
+                >
                   {persona.label}
                 </option>
               ))}
@@ -255,7 +264,14 @@ export function SettingsPage({ isDark, onSave, onCancel }: SettingsPageProps) {
               }}
             >
               {languages.map((language) => (
-                <option key={language.id} value={language.id}>
+                <option
+                  key={language.id}
+                  value={language.id}
+                  style={{
+                    fontSize: '17px',
+                    padding: '12px 16px',
+                  }}
+                >
                   {language.label}
                 </option>
               ))}
