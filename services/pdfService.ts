@@ -121,6 +121,9 @@ const renderPDFHTML = (request: ServiceRequest): string => {
           <p style="margin: 5px 0; font-size: 13px;">
             <strong>Phone:</strong> ${request.contact_phone}
           </p>
+          <p style="margin: 5px 0; font-size: 13px;">
+            <strong>Fleet:</strong> ${request.fleet_name}
+          </p>
         </div>
 
         <!-- Location -->
@@ -156,39 +159,35 @@ const renderPDFHTML = (request: ServiceRequest): string => {
           <p style="margin: 5px 0; font-size: 13px;">
             <strong>Type:</strong> ${request.vehicle.vehicle_type}
           </p>
-          ${request.vehicle.make || request.vehicle.model ? `
-            <p style="margin: 5px 0; font-size: 13px;">
-              <strong>Make/Model:</strong> ${request.vehicle.make || ''}${request.vehicle.make && request.vehicle.model ? ' ' : ''}${request.vehicle.model || ''}
-            </p>
-          ` : ''}
-          ${request.vehicle.year ? `
-            <p style="margin: 5px 0; font-size: 13px;">
-              <strong>Year:</strong> ${request.vehicle.year}
-            </p>
-          ` : ''}
-          ${request.vehicle.license_plate ? `
-            <p style="margin: 5px 0; font-size: 13px;">
-              <strong>License Plate:</strong> ${request.vehicle.license_plate}
-            </p>
-          ` : ''}
-          ${request.vehicle.unit_number ? `
-            <p style="margin: 5px 0; font-size: 13px;">
-              <strong>Unit Number:</strong> ${request.vehicle.unit_number}
-            </p>
-          ` : ''}
         </div>
 
         <!-- Service Required -->
         <div style="margin: 15px 0; border-bottom: 2px solid #000; padding-bottom: 10px;">
           <h3 style="margin: 5px 0; font-size: 16px; text-transform: uppercase; background: #f0f0f0; padding: 5px;">
-            SERVICE REQUIRED
+            SERVICE REQUIRED — ${request.service_type}
           </h3>
-          <p style="margin: 5px 0; font-size: 13px;">
-            <strong>Type:</strong> ${request.service_type.replace(/_/g, ' ')}
-          </p>
-          <p style="margin: 5px 0; font-size: 13px;">
-            <strong>Description:</strong> ${request.description}
-          </p>
+          ${request.service_type === 'TIRE' && request.tire_info ? `
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Requested Service:</strong> ${request.tire_info.requested_service}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Tire:</strong> ${request.tire_info.requested_tire}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Quantity:</strong> ${request.tire_info.number_of_tires}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Position:</strong> ${request.tire_info.tire_position}
+            </p>
+          ` : ''}
+          ${request.service_type === 'MECHANICAL' && request.mechanical_info ? `
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Requested Service:</strong> ${request.mechanical_info.requested_service}
+            </p>
+            <p style="margin: 5px 0; font-size: 13px;">
+              <strong>Problem Description:</strong> ${request.mechanical_info.description}
+            </p>
+          ` : ''}
         </div>
 
         <!-- Scheduled Appointment (if applicable) -->
@@ -202,9 +201,6 @@ const renderPDFHTML = (request: ServiceRequest): string => {
             </p>
             <p style="margin: 5px 0; font-size: 13px;">
               <strong>Time:</strong> ${request.scheduled_appointment.scheduled_time}
-            </p>
-            <p style="margin: 5px 0; font-size: 13px;">
-              <strong>Service Location:</strong> ${request.scheduled_appointment.scheduled_location}
             </p>
           </div>
         ` : ''}

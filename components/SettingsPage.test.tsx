@@ -63,10 +63,6 @@ describe('SettingsPage', () => {
       />
     );
 
-    // Make a change first to enable the Cancel button
-    const voiceSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(voiceSelect, { target: { value: 'nova' } });
-
     const cancelButton = screen.getByText('Cancel');
     fireEvent.click(cancelButton);
 

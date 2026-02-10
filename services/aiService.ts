@@ -250,44 +250,40 @@ ${conversationHistory}
 CURRENT DATA (may have empty fields):
 ${JSON.stringify(currentRequest, null, 2)}
 
-EXTRACTION RULES (ALL FIELDS BELOW ARE REQUIRED):
+EXTRACTION RULES:
 1. Extract ANY information mentioned - be thorough as these fields are required for dispatch
-2. Infer service_type ONLY from SPECIFIC problem descriptions:
-   - "flat tire", "tire blow", "tire change", "blowout" → TIRE_SERVICE
-   - "battery dead", "jump start", "won't start" (with battery mention) → JUMP_START
-   - "out of fuel", "out of diesel", "need fuel" → FUEL_DELIVERY
-   - "locked out", "keys locked in" → LOCKOUT
-   - "need a tow", "can't move", "tow truck" → TOWING
-   - "engine problem", "transmission", "overheating", "coolant", "oil leak" → MECHANICAL_REPAIR
+2. Infer service_type from problem descriptions:
+   - "flat tire", "tire blow", "tire change", "blowout", "tire repair", "tire replace" → TIRE
+   - "engine", "transmission", "overheating", "coolant", "oil leak", "brakes", "towing", "jump start", "battery", "fuel", "lockout", "won't start" → MECHANICAL
    - DO NOT infer service_type from vague terms like "broke down" alone - wait for specific details
-3. Infer urgency CAREFULLY based on MULTIPLE context factors:
+3. Infer urgency CAREFULLY:
+   - ERS: Unsafe location (highway shoulder, blocking lane) OR user says "emergency", "urgent", "ASAP", "right now"
+   - DELAYED: User says "tomorrow", "tomorrow morning", "next day"
+   - SCHEDULED: User mentions scheduling, future dates, appointments
+   - DEFAULT: If unclear, leave as empty string
+4. Extract driver_name from any mention of the driver's name
+5. Extract location from highway numbers, mile markers, city names, streets, rest stops, exits
+6. Extract phone from ANY mention of phone/contact number
+7. Extract fleet_name from company name, fleet name, or trucking company mentions
+8. Infer vehicle_type: "truck" or "semi" → TRUCK, "trailer" → TRAILER
 
-   ERS (Emergency Road Service) - ONLY if ALL these conditions are met:
-   - Location is UNSAFE (highway shoulder, blocking lane, traffic area) OR
-   - Vehicle is completely immobile AND in an unsafe/vulnerable location OR
-   - User explicitly says "emergency", "urgent", "ASAP", "right now", "as soon as possible"
+FOR TIRE REQUESTS - extract tire_info:
+   - requested_service: "REPLACE" or "REPAIR" (from "replace", "new tire" → REPLACE; "repair", "patch", "plug" → REPAIR)
+   - requested_tire: tire size/brand (e.g., "295/75R22.5", "11R22.5")
+   - number_of_tires: how many tires needed (integer)
+   - tire_position: which position (e.g., "left front steer", "right rear drive", "trailer axle 2 outside")
 
-   SCHEDULED - If ANY of these apply:
-   - User mentions scheduling: "schedule", "appointment", "next week", specific future dates
-   - Location is SAFE (parking lot, shop, home, rest area) AND service is non-emergency (tire, maintenance)
-   - User asks about timing/availability without urgency indicators
-
-   DELAYED - If:
-   - User explicitly says "tomorrow", "tomorrow morning", "next day"
-
-   DEFAULT: If urgency is unclear, DO NOT GUESS - leave as empty string and let AI ask for clarification
-
-4. Extract location from ANY mention of: highway numbers, mile markers, city names, street names, rest stops, exits
-5. Extract phone from ANY mention of phone/contact number
-6. Infer vehicle_type: "truck" or "semi" → TRUCK, "trailer" → TRAILER
-7. Create description from ALL problem mentions (include everything user said about the problem)
+FOR MECHANICAL REQUESTS - extract mechanical_info:
+   - requested_service: type of service (e.g., "engine repair", "brake service", "towing", "jump start", "fuel delivery")
+   - description: detailed problem description from everything user said
 
 Return JSON with ALL extracted fields. Include fields even if partially complete:
 {
+  "driver_name": "string",
   "contact_phone": "string",
-  "service_type": "TOWING" | "TIRE_SERVICE" | "JUMP_START" | "FUEL_DELIVERY" | "LOCKOUT" | "MECHANICAL_REPAIR" | "OTHER",
+  "fleet_name": "string",
+  "service_type": "TIRE" | "MECHANICAL",
   "urgency": "ERS" | "DELAYED" | "SCHEDULED",
-  "description": "string - summarize the problem",
   "location": {
     "current_location": "string",
     "highway_or_road": "string",
@@ -295,20 +291,29 @@ Return JSON with ALL extracted fields. Include fields even if partially complete
     "is_safe_location": boolean
   },
   "vehicle": {
-    "vehicle_type": "TRUCK" | "TRAILER",
-    "make": "string",
-    "model": "string",
-    "year": "string",
-    "unit_number": "string"
+    "vehicle_type": "TRUCK" | "TRAILER"
+  },
+  "tire_info": {
+    "requested_service": "REPLACE" | "REPAIR",
+    "requested_tire": "string",
+    "number_of_tires": number,
+    "tire_position": "string"
+  },
+  "mechanical_info": {
+    "requested_service": "string",
+    "description": "string"
   },
   "scheduled_appointment": {
-    "scheduled_date": "string - e.g., 'Next Monday', 'February 15th', '2025-02-15'",
-    "scheduled_time": "string - e.g., 'Morning', '2:00 PM', 'afternoon'",
-    "scheduled_location": "string - where service should happen (current location or different address)"
+    "scheduled_date": "string",
+    "scheduled_time": "string"
   }
 }
 
-IMPORTANT: Only include "scheduled_appointment" field if urgency is "SCHEDULED". Otherwise omit it.
+IMPORTANT:
+- Only include "tire_info" if service_type is "TIRE". Otherwise omit it.
+- Only include "mechanical_info" if service_type is "MECHANICAL". Otherwise omit it.
+- Only include "scheduled_appointment" if urgency is "SCHEDULED". Otherwise omit it.
+- Omit any field where the value is unknown or not mentioned.
 
 Return ONLY the JSON object, no other text.`;
 

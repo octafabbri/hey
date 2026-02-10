@@ -64,6 +64,8 @@ const App: React.FC = () => {
   const [activeServiceRequest, setActiveServiceRequest] = useState<ServiceRequest | null>(null);
   const [serviceRequestSession, setServiceRequestSession] = useState<ChatSession | null>(null);
   const [completedServiceRequest, setCompletedServiceRequest] = useState<ServiceRequest | null>(null);
+  const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
+  const [isAwaitingWorkOrderPrompt, setIsAwaitingWorkOrderPrompt] = useState(false);
 
   // Chat History (shared between voice and chat modes)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -76,6 +78,10 @@ const App: React.FC = () => {
   const silenceTimerRef = useRef<any>(null);
   const transcriptAccumulatorRef = useRef<string>('');
   const currentAIResponseRef = useRef<string>('');
+  const isListeningRef = useRef(false);
+  const inputModeRef = useRef<InputMode>('voice');
+  const assistantStartedRef = useRef(false);
+  const toggleListenRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // Dark Mode Detection - Disabled (always use light mode)
   // useEffect(() => {
@@ -89,6 +95,11 @@ const App: React.FC = () => {
   //   darkModeQuery.addEventListener('change', handleChange);
   //   return () => darkModeQuery.removeEventListener('change', handleChange);
   // }, []);
+
+  // Keep refs in sync for use inside async callbacks (avoids stale closures)
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+  useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
+  useEffect(() => { assistantStartedRef.current = assistantStarted; }, [assistantStarted]);
 
   useEffect(() => {
     if (isDark) {
@@ -123,9 +134,6 @@ const App: React.FC = () => {
     if (completedServiceRequest) {
       // PDF is ready for download
       setAssistantState('pdf-ready');
-    } else if (isServiceRequestActive && activeServiceRequest && validateServiceRequest(activeServiceRequest).isComplete) {
-      // Service request complete, generating PDF
-      setAssistantState('pdf-generating');
     } else if (isServiceRequestActive && activeServiceRequest?.urgency === 'ERS' && isSpeaking) {
       // Emergency response state
       setAssistantState('urgent');
@@ -180,15 +188,15 @@ const App: React.FC = () => {
       setIsResponseComplete(true);
       console.log('🔊 speakAiResponse finished');
 
-      // Auto-start listening after AI finishes speaking (if assistant is active)
-      if (assistantStarted && !isListening) {
+      // Auto-start listening after AI finishes speaking (voice mode only)
+      if (assistantStartedRef.current && !isListeningRef.current && inputModeRef.current === 'voice') {
         console.log('🎤 Auto-starting listening after AI response');
         setTimeout(() => {
-          toggleListen();
+          toggleListenRef.current();
         }, 500); // Small delay to ensure audio playback is fully complete
       }
     }
-  }, [userProfile.voiceOutput, assistantStarted, isListening]); // toggleListen is stable, don't need in deps
+  }, [userProfile.voiceOutput]); // All other checks use refs to avoid stale closures
 
   // Get time-appropriate greeting
   const getTimeBasedGreeting = useCallback(() => {
@@ -219,6 +227,7 @@ const App: React.FC = () => {
     }
 
     setAssistantStarted(true);
+    assistantStartedRef.current = true; // Set ref immediately so speakAiResponse auto-listen works
     if (!import.meta.env.VITE_OPENAI_API_KEY) {
       setApiKeyError(API_KEY_ERROR_MESSAGE);
       return;
@@ -284,13 +293,84 @@ const App: React.FC = () => {
     }
   }, [pendingMoodEntry, wellnessCheckinStep, userProfile, speakAiResponse, addMessage]);
 
+  // Deep-merge extracted data into current request (nested objects like tire_info, location, etc.)
+  const mergeServiceRequestData = (current: ServiceRequest, extracted: Partial<ServiceRequest>): ServiceRequest => {
+    return {
+      ...current,
+      ...extracted,
+      location: { ...current.location, ...extracted.location },
+      vehicle: { ...current.vehicle, ...extracted.vehicle },
+      ...(extracted.tire_info || current.tire_info
+        ? { tire_info: { ...current.tire_info, ...extracted.tire_info } as ServiceRequest['tire_info'] }
+        : {}),
+      ...(extracted.mechanical_info || current.mechanical_info
+        ? { mechanical_info: { ...current.mechanical_info, ...extracted.mechanical_info } as ServiceRequest['mechanical_info'] }
+        : {}),
+      ...(extracted.scheduled_appointment || current.scheduled_appointment
+        ? { scheduled_appointment: { ...current.scheduled_appointment, ...extracted.scheduled_appointment } as ServiceRequest['scheduled_appointment'] }
+        : {}),
+    };
+  };
+
+  // Service Request Helpers
+  const buildConfirmationSummary = (request: ServiceRequest): string => {
+    const vehicleType = request.vehicle.vehicle_type?.toLowerCase() || 'vehicle';
+    const urgencyText = request.urgency === 'ERS' ? 'emergency same-day' : request.urgency === 'DELAYED' ? 'next-day' : 'scheduled';
+
+    let summary = `Alright, let me read this back to you. ` +
+      `Driver name, ${request.driver_name}. ` +
+      `Phone, ${request.contact_phone}. ` +
+      `Fleet, ${request.fleet_name}. ` +
+      `Location, ${request.location.current_location}. ` +
+      `Vehicle type, ${vehicleType}. `;
+
+    if (request.service_type === 'TIRE' && request.tire_info) {
+      summary += `Service type, tire ${request.tire_info.requested_service?.toLowerCase() || 'service'}. ` +
+        `Tire, ${request.tire_info.requested_tire}. ` +
+        `Quantity, ${request.tire_info.number_of_tires}. ` +
+        `Position, ${request.tire_info.tire_position}. `;
+    } else if (request.service_type === 'MECHANICAL' && request.mechanical_info) {
+      summary += `Service type, mechanical. ` +
+        `Requested service, ${request.mechanical_info.requested_service}. ` +
+        `Issue, ${request.mechanical_info.description}. `;
+    }
+
+    summary += `Priority, ${urgencyText}. `;
+
+    if (request.urgency === 'SCHEDULED' && request.scheduled_appointment) {
+      summary += `Scheduled for ${request.scheduled_appointment.scheduled_date} at ${request.scheduled_appointment.scheduled_time}. `;
+    }
+
+    summary += `Does everything look right, or do you need to change anything?`;
+    return summary;
+  };
+
+  const CONFIRMATION_KEYWORDS = ['yes', 'yeah', 'yep', 'yup', 'correct', 'right', 'good', 'looks good', 'confirm', "that's right", 'perfect', 'go ahead', 'send it', 'submit', 'ok', 'okay', 'sure'];
+
+  const finalizeServiceRequest = useCallback((request: ServiceRequest) => {
+    console.log('🚨 FINALIZING SERVICE REQUEST');
+    request.status = 'submitted';
+    const updatedProfile = addServiceRequest(userProfile, request);
+    setUserProfile(updatedProfile);
+    saveUserProfile(updatedProfile);
+    setCompletedServiceRequest(request);
+
+    const completionMsg = `Got it, your work order is ready to download.`;
+    addMessage('ai', completionMsg, request);
+    speakAiResponse(completionMsg);
+
+    setIsServiceRequestActive(false);
+    setActiveServiceRequest(null);
+    setIsAwaitingConfirmation(false);
+  }, [userProfile, speakAiResponse, addMessage]);
+
   // Service Request Functions
-  const startServiceRequest = useCallback(() => {
-    console.log('🚨 SERVICE REQUEST STARTED');
+  const startServiceRequest = useCallback(async (initialMessage: string) => {
+    console.log('🚨 SERVICE REQUEST STARTED with initial message:', initialMessage);
     const newRequest = createServiceRequest();
     newRequest.driver_name = userProfile.userName || 'Driver';
-    setActiveServiceRequest(newRequest);
     setIsServiceRequestActive(true);
+    setIsAwaitingConfirmation(false);
 
     const session = createNewChatWithTask(
       AssistantTask.SERVICE_REQUEST,
@@ -299,15 +379,94 @@ const App: React.FC = () => {
     );
     setServiceRequestSession(session);
 
-    const greeting = "Copy that, I'm here to help. First, are you in a safe spot?";
-    addMessage('ai', greeting);
-    speakAiResponse(greeting);
+    // Immediately send the user's initial message to the AI so they don't have to repeat
+    setIsLoadingAI(true);
+    try {
+      const response = await session.sendMessage({ message: initialMessage });
+      const aiText = response.text;
+
+      // Extract data from the first exchange
+      const newExchange = `user: ${initialMessage}\nai: ${aiText}`;
+      const extractedData = await extractServiceDataFromConversation(newExchange, newRequest);
+
+      const updatedRequest = mergeServiceRequestData(newRequest, {
+        ...extractedData,
+        conversation_transcript: newExchange,
+      });
+      setActiveServiceRequest(updatedRequest);
+
+      // Always show the AI's response in chat
+      addMessage('ai', aiText);
+
+      // Check completeness - if complete, also present confirmation
+      const validation = validateServiceRequest(updatedRequest);
+      if (validation.isComplete) {
+        const summary = buildConfirmationSummary(updatedRequest);
+        addMessage('ai', summary);
+        speakAiResponse(summary);
+        setIsAwaitingConfirmation(true);
+      } else {
+        speakAiResponse(aiText);
+      }
+    } catch (error) {
+      console.error("Service request start error:", error);
+      const errorMsg = "Error starting service request. Please try again.";
+      addMessage('ai', errorMsg);
+      speakAiResponse(errorMsg);
+      setIsServiceRequestActive(false);
+    } finally {
+      setIsLoadingAI(false);
+    }
   }, [userProfile, speakAiResponse, addMessage]);
 
   const handleServiceRequestResponse = useCallback(async (text: string) => {
     if (!serviceRequestSession || !activeServiceRequest) return;
 
     console.log('🚨 SERVICE REQUEST - User input:', text);
+
+    // Handle work order prompt response
+    if (isAwaitingWorkOrderPrompt) {
+      const lowerText = text.toLowerCase();
+      const wantsWorkOrder = CONFIRMATION_KEYWORDS.some(kw => lowerText.includes(kw));
+      const declinesWorkOrder = ['no', 'nah', 'nope', 'not now', 'skip', 'no thanks'].some(kw => lowerText.includes(kw));
+
+      if (wantsWorkOrder && !declinesWorkOrder) {
+        finalizeServiceRequest(activeServiceRequest);
+        setIsAwaitingWorkOrderPrompt(false);
+        return;
+      } else if (declinesWorkOrder) {
+        const ackMsg = "No problem. Your service request has been noted. If you need a work order later, just let me know.";
+        addMessage('ai', ackMsg);
+        speakAiResponse(ackMsg);
+        setIsServiceRequestActive(false);
+        setActiveServiceRequest(null);
+        setIsAwaitingWorkOrderPrompt(false);
+        return;
+      }
+      // If unclear, fall through to normal AI processing
+      setIsAwaitingWorkOrderPrompt(false);
+    }
+
+    // Handle confirmation response
+    if (isAwaitingConfirmation) {
+      const lowerText = text.toLowerCase();
+      const isConfirmed = CONFIRMATION_KEYWORDS.some(kw => lowerText.includes(kw));
+      const wantsEdit = ['no', 'change', 'edit', 'wrong', 'fix', 'update', 'actually', 'wait', 'incorrect'].some(kw => lowerText.includes(kw));
+
+      if (isConfirmed && !wantsEdit) {
+        // User confirmed details - ask if they want a work order
+        setIsAwaitingConfirmation(false);
+        setIsAwaitingWorkOrderPrompt(true);
+        const workOrderPrompt = "Everything checks out. Would you like me to generate a work order for this?";
+        addMessage('ai', workOrderPrompt);
+        speakAiResponse(workOrderPrompt);
+        return;
+      }
+
+      // User wants to edit - send their correction to the AI and continue
+      console.log('🚨 User wants to edit service request');
+      setIsAwaitingConfirmation(false);
+    }
 
     setIsLoadingAI(true);
     try {
@@ -328,40 +487,29 @@ const App: React.FC = () => {
       );
       console.log('🚨 Extracted data:', extractedData);
 
-      // Merge extracted data
-      const updatedRequest = {
-        ...activeServiceRequest,
+      // Deep-merge extracted data (preserves nested fields from prior exchanges)
+      const updatedRequest = mergeServiceRequestData(activeServiceRequest, {
         ...extractedData,
-        conversation_transcript: fullTranscript
-      };
+        conversation_transcript: fullTranscript,
+      });
       console.log('🚨 Merged request:', updatedRequest);
       setActiveServiceRequest(updatedRequest);
 
       // Validate completeness
       const validation = validateServiceRequest(updatedRequest);
       console.log('🚨 Validation result:', validation);
-      console.log('🚨 Updated request:', updatedRequest);
+
+      // Always show the AI's response in chat
+      addMessage('ai', aiText);
 
       if (validation.isComplete) {
-        console.log('🚨 SERVICE REQUEST COMPLETE - Ready to download');
-        // Mark as submitted and save
-        updatedRequest.status = 'submitted';
-        const updatedProfile = addServiceRequest(userProfile, updatedRequest);
-        setUserProfile(updatedProfile);
-        saveUserProfile(updatedProfile);
-
-        // Show completion message with download button
-        const completionMsg = `Got everything. Your work order is ready to download.`;
-        addMessage('ai', completionMsg, updatedRequest);
-        speakAiResponse(completionMsg);
-
-        // Clean up state
-        setIsServiceRequestActive(false);
-        setActiveServiceRequest(null);
+        // Also present confirmation summary
+        const summary = buildConfirmationSummary(updatedRequest);
+        addMessage('ai', summary);
+        speakAiResponse(summary);
+        setIsAwaitingConfirmation(true);
       } else {
         console.log('🚨 SERVICE REQUEST INCOMPLETE - Missing:', validation.missingFields);
-        // Continue conversation
-        addMessage('ai', aiText);
         speakAiResponse(aiText);
       }
     } catch (error) {
@@ -372,7 +520,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoadingAI(false);
     }
-  }, [serviceRequestSession, activeServiceRequest, userProfile, speakAiResponse, addMessage]);
+  }, [serviceRequestSession, activeServiceRequest, isAwaitingConfirmation, isAwaitingWorkOrderPrompt, userProfile, speakAiResponse, addMessage, finalizeServiceRequest]);
 
   const processUserInput = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -424,8 +572,8 @@ const App: React.FC = () => {
 
     // Check for service request keywords
     if (SERVICE_REQUEST_KEYWORDS.some(kw => lowerText.includes(kw))) {
-      startServiceRequest();
-      setIsLoadingAI(false);
+      setIsLoadingAI(false); // startServiceRequest manages its own loading state
+      startServiceRequest(text);
       return;
     }
 
@@ -476,7 +624,7 @@ const App: React.FC = () => {
   const toggleListen = useCallback(async () => {
     await initializeAudio();
 
-    if (isListening) {
+    if (isListeningRef.current) {
       // Stop listening
       if (speechRecognitionRef.current) {
         speechRecognitionRef.current.stop();
@@ -556,7 +704,10 @@ const App: React.FC = () => {
         recognition.start();
       }
     }
-  }, [isListening, isSpeaking, userProfile, processUserInput]);
+  }, [isSpeaking, userProfile, processUserInput]);
+
+  // Keep toggleListen ref in sync so speakAiResponse always calls the latest version
+  useEffect(() => { toggleListenRef.current = toggleListen; }, [toggleListen]);
 
   // Handle sending messages from chat interface
   const handleChatSend = useCallback((message: string) => {
