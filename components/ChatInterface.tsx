@@ -1,11 +1,14 @@
-import { Send, Mic } from 'lucide-react';
+import { Send, Mic, Download } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
+import { ServiceRequest } from '../types';
+import { generateServiceRequestPDF, downloadPDF } from '../services/pdfService';
 
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'ai' | 'system';
   text: string;
   timestamp: Date;
+  data?: any;
 }
 
 interface ChatInterfaceProps {
@@ -160,6 +163,52 @@ export function ChatInterface({
                 >
                   {message.text}
                 </p>
+
+                {/* Download Work Order button for completed service requests */}
+                {message.data && message.data.service_type && message.data.urgency && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const request = message.data as ServiceRequest;
+                        const blob = await generateServiceRequestPDF(request);
+                        const filename = `work-order-${request.urgency}-${request.id.slice(0, 8)}.pdf`;
+                        downloadPDF(blob, filename);
+                      } catch (error) {
+                        console.error('PDF generation failed:', error);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      width: '100%',
+                      marginTop: '10px',
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      border: 'none',
+                      background: 'var(--accent-blue)',
+                      color: '#FFFFFF',
+                      fontSize: '15px',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      cursor: 'pointer',
+                      transition: 'transform 0.1s ease',
+                    }}
+                    onMouseDown={(e) => {
+                      e.currentTarget.style.transform = 'scale(0.97)';
+                    }}
+                    onMouseUp={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                  >
+                    <Download size={16} strokeWidth={2.5} />
+                    Download Work Order
+                  </button>
+                )}
               </div>
             </div>
           );

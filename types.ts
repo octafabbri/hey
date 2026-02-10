@@ -69,13 +69,25 @@ export interface MoodEntry {
 
 // Service Coordination Types
 export enum ServiceType {
-  TOWING = 'TOWING',
-  TIRE_SERVICE = 'TIRE_SERVICE',
-  JUMP_START = 'JUMP_START',
-  FUEL_DELIVERY = 'FUEL_DELIVERY',
-  LOCKOUT = 'LOCKOUT',
-  MECHANICAL_REPAIR = 'MECHANICAL_REPAIR',
-  OTHER = 'OTHER'
+  TIRE = 'TIRE',
+  MECHANICAL = 'MECHANICAL',
+}
+
+export enum TireServiceType {
+  REPLACE = 'REPLACE',
+  REPAIR = 'REPAIR',
+}
+
+export interface TireServiceInfo {
+  requested_service: TireServiceType;
+  requested_tire: string;       // size/brand e.g. "295/75R22.5"
+  number_of_tires: number;
+  tire_position: string;        // e.g. "left front steer", "right rear drive"
+}
+
+export interface MechanicalServiceInfo {
+  requested_service: string;    // e.g. "engine repair", "brake service"
+  description: string;          // detailed problem description
 }
 
 export enum VehicleType {
@@ -90,12 +102,7 @@ export enum ServiceUrgency {
 }
 
 export interface VehicleInfo {
-  vehicle_type: VehicleType; // Required: TRUCK or TRAILER
-  make?: string;
-  model?: string;
-  year?: string;
-  license_plate?: string;
-  unit_number?: string; // Fleet tracking number
+  vehicle_type: VehicleType;
 }
 
 export interface LocationInfo {
@@ -108,7 +115,6 @@ export interface LocationInfo {
 export interface ScheduledAppointmentInfo {
   scheduled_date: string;       // e.g., "2025-02-15" or "Next Monday"
   scheduled_time: string;       // e.g., "10:00 AM" or "Morning"
-  scheduled_location: string;   // Where service should take place
 }
 
 export interface ServiceRequest {
@@ -118,15 +124,19 @@ export interface ServiceRequest {
   // Contact
   driver_name: string;
   contact_phone: string;
+  fleet_name: string;
 
   // Service details
   service_type: ServiceType;
   urgency: ServiceUrgency;
-  description: string;
 
   // Location & vehicle
   location: LocationInfo;
   vehicle: VehicleInfo;
+
+  // Service-type-specific info
+  tire_info?: TireServiceInfo;
+  mechanical_info?: MechanicalServiceInfo;
 
   // Scheduled appointment (only for SCHEDULED urgency)
   scheduled_appointment?: ScheduledAppointmentInfo;

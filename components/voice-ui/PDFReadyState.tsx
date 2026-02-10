@@ -104,8 +104,9 @@ export function PDFReadyState({
           duration: 0.5,
           ease: [0.32, 0.72, 0, 1], // iOS spring curve
         }}
-        className="fixed bottom-0 left-0 right-0"
+        className="fixed left-0 right-0"
         style={{
+          bottom: '140px', // Above BottomMenuBar (64px) + InputModeToggle (~48px) + spacing
           paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 0px)',
         }}
         onClick={(e) => e.stopPropagation()}

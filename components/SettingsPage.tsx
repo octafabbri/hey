@@ -1,5 +1,4 @@
-import { ChevronDown } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { OPENAI_VOICES } from '../constants';
 
 interface SettingsPageProps {
@@ -29,12 +28,10 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
         language: selectedLanguage,
       });
     }
-    // In a real app, this would save to storage/backend
     console.log('Settings saved:', { voicePersona: selectedVoice, language: selectedLanguage });
   };
 
   const handleCancel = () => {
-    // Revert to original values
     setSelectedVoice(originalVoice);
     setSelectedLanguage(originalLanguage);
 
@@ -136,7 +133,6 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
 
           <div
             style={{
-              position: 'relative',
               background: isDark
                 ? 'rgba(28, 28, 30, 0.7)'
                 : 'rgba(255, 255, 255, 0.9)',
@@ -154,46 +150,22 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
               onChange={(e) => setSelectedVoice(e.target.value)}
               style={{
                 width: '100%',
-                padding: '20px 16px',
-                fontSize: '19px',
-                fontWeight: 'var(--font-weight-normal)',
-                letterSpacing: '-0.01em',
+                padding: '16px',
+                fontSize: '17px',
                 color: isDark ? 'var(--label-primary)' : '#000000',
-                background: 'transparent',
+                background: isDark ? '#1C1C1E' : '#FFFFFF',
                 border: 'none',
                 outline: 'none',
                 cursor: 'pointer',
-                appearance: 'none',
-                WebkitAppearance: 'none',
+                borderRadius: '12px',
               }}
             >
               {voicePersonas.map((persona) => (
-                <option
-                  key={persona.id}
-                  value={persona.id}
-                  style={{
-                    fontSize: '17px',
-                    padding: '12px 16px',
-                  }}
-                >
+                <option key={persona.id} value={persona.id}>
                   {persona.label}
                 </option>
               ))}
             </select>
-
-            {/* Custom dropdown icon */}
-            <div
-              style={{
-                position: 'absolute',
-                right: '32px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                pointerEvents: 'none',
-                color: 'var(--label-tertiary)',
-              }}
-            >
-              <ChevronDown size={20} strokeWidth={2.5} />
-            </div>
           </div>
 
           <p
@@ -232,7 +204,6 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
 
           <div
             style={{
-              position: 'relative',
               background: isDark
                 ? 'rgba(28, 28, 30, 0.7)'
                 : 'rgba(255, 255, 255, 0.9)',
@@ -250,46 +221,22 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
               onChange={(e) => setSelectedLanguage(e.target.value)}
               style={{
                 width: '100%',
-                padding: '20px 16px',
-                fontSize: '19px',
-                fontWeight: 'var(--font-weight-normal)',
-                letterSpacing: '-0.01em',
+                padding: '16px',
+                fontSize: '17px',
                 color: isDark ? 'var(--label-primary)' : '#000000',
-                background: 'transparent',
+                background: isDark ? '#1C1C1E' : '#FFFFFF',
                 border: 'none',
                 outline: 'none',
                 cursor: 'pointer',
-                appearance: 'none',
-                WebkitAppearance: 'none',
+                borderRadius: '12px',
               }}
             >
               {languages.map((language) => (
-                <option
-                  key={language.id}
-                  value={language.id}
-                  style={{
-                    fontSize: '17px',
-                    padding: '12px 16px',
-                  }}
-                >
+                <option key={language.id} value={language.id}>
                   {language.label}
                 </option>
               ))}
             </select>
-
-            {/* Custom dropdown icon */}
-            <div
-              style={{
-                position: 'absolute',
-                right: '32px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                pointerEvents: 'none',
-                color: 'var(--label-tertiary)',
-              }}
-            >
-              <ChevronDown size={20} strokeWidth={2.5} />
-            </div>
           </div>
 
           <p
@@ -339,7 +286,7 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
       <div
         style={{
           position: 'fixed',
-          bottom: '84px', // Above the menu bar (64px + 20px spacing)
+          bottom: '84px',
           left: 0,
           right: 0,
           padding: '0 16px',
@@ -357,19 +304,15 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
             pointerEvents: 'auto',
           }}
         >
-          {/* Cancel Button */}
           <button
             onClick={handleCancel}
-            disabled={!hasChanges}
             style={{
               flex: 1,
               padding: '16px',
               fontSize: '17px',
               fontWeight: 'var(--font-weight-semibold)',
               letterSpacing: '-0.01em',
-              color: hasChanges
-                ? (isDark ? 'var(--label-primary)' : '#000000')
-                : 'var(--label-tertiary)',
+              color: isDark ? 'var(--label-primary)' : '#000000',
               background: isDark
                 ? 'rgba(28, 28, 30, 0.85)'
                 : 'rgba(255, 255, 255, 0.85)',
@@ -379,14 +322,11 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
                 isDark ? 'rgba(84, 84, 88, 0.6)' : 'rgba(60, 60, 67, 0.29)'
               }`,
               borderRadius: '12px',
-              cursor: hasChanges ? 'pointer' : 'not-allowed',
+              cursor: 'pointer',
               transition: 'transform 0.1s ease, opacity 0.2s ease',
-              opacity: hasChanges ? 1 : 0.5,
             }}
             onMouseDown={(e) => {
-              if (hasChanges) {
-                e.currentTarget.style.transform = 'scale(0.98)';
-              }
+              e.currentTarget.style.transform = 'scale(0.98)';
             }}
             onMouseUp={(e) => {
               e.currentTarget.style.transform = 'scale(1)';
@@ -398,7 +338,6 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
             Cancel
           </button>
 
-          {/* Save Button */}
           <button
             onClick={handleSave}
             disabled={!hasChanges}
