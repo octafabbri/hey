@@ -70,6 +70,29 @@ A voice-first AI dispatcher for emergency roadside assistance, built with React 
 | `npm run test:run` | Run tests once and exit |
 | `npm run test:ui` | Run tests with Vitest UI dashboard |
 | `npm run test:coverage` | Run tests with coverage report |
+| `npm run deploy` | Build and deploy to Cloudflare Pages (production) |
+| `npm run deploy:preview` | Build and deploy a preview branch |
+
+## Deploying to Cloudflare Pages
+
+The project is configured with [Wrangler](https://developers.cloudflare.com/workers/wrangler/) for Cloudflare Pages deployment.
+
+1. **Log in to Cloudflare** (first time only):
+   ```bash
+   npx wrangler login
+   ```
+
+2. **Set the API key** in the Cloudflare dashboard:
+   - Go to your Pages project > **Settings** > **Environment variables**
+   - Add `VITE_OPENAI_API_KEY` with your OpenAI key
+   - This ensures the key is baked into the build at deploy time without being in source control
+
+3. **Deploy:**
+   ```bash
+   npm run deploy
+   ```
+
+> On the first deploy, Wrangler will prompt you to create the Pages project. Subsequent deploys update it in place.
 
 ## Project Structure
 
