@@ -67,6 +67,35 @@ export interface MoodEntry {
   notes?: string; // Optional free-form notes from user's response
 }
 
+// User Roles
+export type UserRole = 'fleet' | 'provider';
+
+// Service Request Status (9-state lifecycle)
+export type ServiceRequestStatus =
+  | 'draft'              // Fleet user still filling in via conversation
+  | 'submitted'          // Fleet user confirmed, visible to providers
+  | 'accepted'           // Provider accepted as-is
+  | 'rejected'           // Provider declined
+  | 'counter_proposed'   // Provider proposed different date/time
+  | 'counter_approved'   // Fleet user approved the counter-proposal
+  | 'counter_rejected'   // Fleet user rejected the counter-proposal
+  | 'completed'          // Work is done
+  | 'cancelled';         // Fleet user cancelled
+
+// Counter Proposal (provider proposes different schedule)
+export interface CounterProposal {
+  id: string;
+  service_request_id: string;
+  provider_id: string;
+  provider_name: string;
+  proposed_date: string;
+  proposed_time: string;
+  message: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  responded_at?: string;
+}
+
 // Service Coordination Types
 export enum ServiceType {
   TIRE = 'TIRE',
@@ -141,9 +170,18 @@ export interface ServiceRequest {
   // Scheduled appointment (only for SCHEDULED urgency)
   scheduled_appointment?: ScheduledAppointmentInfo;
 
-  // Status
-  status: 'draft' | 'submitted' | 'completed';
+  // Status & workflow
+  status: ServiceRequestStatus;
   conversation_transcript?: string;
+
+  // Provider workflow
+  assigned_provider_id?: string;
+  assigned_provider_name?: string;
+  counter_proposals?: CounterProposal[];
+  created_by_id?: string;
+  submitted_at?: string;
+  accepted_at?: string;
+  completed_at?: string;
 }
 
 export interface ActiveModalInfo {

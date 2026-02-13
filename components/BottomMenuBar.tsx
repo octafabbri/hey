@@ -1,29 +1,40 @@
-import { Home, Users, Settings } from 'lucide-react';
+import { Home, Users, Settings, ClipboardList, Briefcase } from 'lucide-react';
 import { useState } from 'react';
+import { UserRole } from '../types';
 
 interface BottomMenuBarProps {
   isDark: boolean;
-  onNavigate?: (tab: 'home' | 'contacts' | 'settings') => void;
+  role?: UserRole;
+  onNavigate?: (tab: string) => void;
 }
 
 export function BottomMenuBar({
   isDark,
+  role = 'fleet',
   onNavigate
 }: BottomMenuBarProps) {
-  const [activeTab, setActiveTab] = useState<'home' | 'contacts' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<string>('home');
 
-  const handleTabPress = (tab: 'home' | 'contacts' | 'settings') => {
+  const handleTabPress = (tab: string) => {
     setActiveTab(tab);
     if (onNavigate) {
       onNavigate(tab);
     }
   };
 
-  const tabs = [
-    { id: 'home' as const, icon: Home, label: 'Home' },
-    { id: 'contacts' as const, icon: Users, label: 'Contacts' },
-    { id: 'settings' as const, icon: Settings, label: 'Settings' },
+  const fleetTabs = [
+    { id: 'home', icon: Home, label: 'Home' },
+    { id: 'contacts', icon: Users, label: 'Contacts' },
+    { id: 'settings', icon: Settings, label: 'Settings' },
   ];
+
+  const providerTabs = [
+    { id: 'dashboard', icon: ClipboardList, label: 'Dashboard' },
+    { id: 'active', icon: Briefcase, label: 'Active' },
+    { id: 'settings', icon: Settings, label: 'Settings' },
+  ];
+
+  const tabs = role === 'provider' ? providerTabs : fleetTabs;
 
   return (
     <div
@@ -32,9 +43,8 @@ export function BottomMenuBar({
         paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 0px)',
         zIndex: 100,
       }}
-      onClick={(e) => e.stopPropagation()} // Prevent triggering parent click handlers
+      onClick={(e) => e.stopPropagation()}
     >
-      {/* iOS System Material - Frosted glass tab bar */}
       <div
         style={{
           background: isDark
@@ -48,7 +58,6 @@ export function BottomMenuBar({
             : '0 -2px 16px rgba(0, 0, 0, 0.06)',
         }}
       >
-        {/* Tab Container */}
         <div
           className="flex items-center justify-around"
           style={{
@@ -85,7 +94,6 @@ export function BottomMenuBar({
                   e.currentTarget.style.transform = 'scale(1)';
                 }}
               >
-                {/* Icon */}
                 <Icon
                   size={24}
                   strokeWidth={2}
@@ -99,7 +107,6 @@ export function BottomMenuBar({
                   }}
                 />
 
-                {/* Label */}
                 <span
                   style={{
                     fontSize: '11px',
