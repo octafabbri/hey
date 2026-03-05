@@ -3,6 +3,18 @@ import { ServiceRequest } from '../../types';
 import { StatusBadge } from '../StatusBadge';
 import { MapPin, Clock, Truck } from 'lucide-react';
 
+function formatDisplayDate(dateStr: string): string {
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts.map(Number);
+    const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+  }
+  return dateStr;
+}
+
 interface WorkOrderCardProps {
   request: ServiceRequest;
   isDark: boolean;
@@ -122,7 +134,7 @@ export const WorkOrderCard: React.FC<WorkOrderCardProps> = ({ request, isDark, o
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Clock size={14} style={{ color: 'var(--label-tertiary)' }} />
             <span style={{ fontSize: '13px', color: 'var(--label-tertiary)' }}>
-              {request.scheduled_appointment.scheduled_date}
+              {formatDisplayDate(request.scheduled_appointment.scheduled_date)}
             </span>
           </div>
         )}

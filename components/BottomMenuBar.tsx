@@ -1,22 +1,22 @@
-import { Home, Users, Settings, ClipboardList, Briefcase } from 'lucide-react';
-import { useState } from 'react';
+import { Home, Bell, Settings, ClipboardList, Briefcase, Mic } from 'lucide-react';
 import { UserRole } from '../types';
 
 interface BottomMenuBarProps {
   isDark: boolean;
   role?: UserRole;
   onNavigate?: (tab: string) => void;
+  badgeCount?: number;
+  activeTab?: string;
 }
 
 export function BottomMenuBar({
   isDark,
   role = 'fleet',
-  onNavigate
+  onNavigate,
+  badgeCount,
+  activeTab: controlledTab,
 }: BottomMenuBarProps) {
-  const [activeTab, setActiveTab] = useState<string>('home');
-
   const handleTabPress = (tab: string) => {
-    setActiveTab(tab);
     if (onNavigate) {
       onNavigate(tab);
     }
@@ -24,17 +24,20 @@ export function BottomMenuBar({
 
   const fleetTabs = [
     { id: 'home', icon: Home, label: 'Home' },
-    { id: 'contacts', icon: Users, label: 'Contacts' },
+    { id: 'notifications', icon: Bell, label: 'Alerts' },
     { id: 'settings', icon: Settings, label: 'Settings' },
   ];
 
   const providerTabs = [
     { id: 'dashboard', icon: ClipboardList, label: 'Dashboard' },
     { id: 'active', icon: Briefcase, label: 'Active' },
+    { id: 'assistant', icon: Mic, label: 'Assistant' },
     { id: 'settings', icon: Settings, label: 'Settings' },
   ];
 
   const tabs = role === 'provider' ? providerTabs : fleetTabs;
+  const defaultTab = role === 'provider' ? 'dashboard' : 'home';
+  const currentActive = controlledTab || defaultTab;
 
   return (
     <div
@@ -69,7 +72,7 @@ export function BottomMenuBar({
         >
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = currentActive === tab.id;
 
             return (
               <button
@@ -77,6 +80,7 @@ export function BottomMenuBar({
                 onClick={() => handleTabPress(tab.id)}
                 className="flex flex-col items-center justify-center gap-1"
                 style={{
+                  position: 'relative',
                   background: 'transparent',
                   border: 'none',
                   cursor: 'pointer',
@@ -106,6 +110,31 @@ export function BottomMenuBar({
                     transition: 'color 0.2s ease',
                   }}
                 />
+
+                {/* Badge on notifications tab (fleet) or assistant tab (provider) */}
+                {(tab.id === 'notifications' || tab.id === 'assistant') && badgeCount != null && badgeCount > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '2px',
+                      right: '10px',
+                      minWidth: '18px',
+                      height: '18px',
+                      borderRadius: '9px',
+                      background: '#FF3B30',
+                      color: '#FFFFFF',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 4px',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {badgeCount > 99 ? '99+' : badgeCount}
+                  </span>
+                )}
 
                 <span
                   style={{

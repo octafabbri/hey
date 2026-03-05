@@ -9,13 +9,16 @@ import {
 
 interface ProviderDashboardProps {
   isDark: boolean;
+  providerId?: string;
   onSelectRequest: (request: ServiceRequest) => void;
 }
 
 type UrgencyFilter = 'ALL' | ServiceUrgency;
 
-export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, onSelectRequest }) => {
-  const [requests, setRequests] = useState<ServiceRequest[]>([]);
+export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, providerId, onSelectRequest }) => {
+  const [incoming, setIncoming] = useState<ServiceRequest[]>([]);
+  const [actionRequired, setActionRequired] = useState<ServiceRequest[]>([]);
+  const [awaitingResponse, setAwaitingResponse] = useState<ServiceRequest[]>([]);
   const [filter, setFilter] = useState<UrgencyFilter>('ALL');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -26,24 +29,51 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, on
     }
 
     try {
-      const data = await getServiceRequests({ status: 'submitted' });
-      setRequests(data);
+      const data = await getServiceRequests({ status: ['submitted', 'counter_proposed'] });
+
+      // Incoming: submitted requests open to any provider
+      const incomingReqs = data.filter((r) => r.status === 'submitted');
+
+      // Counter-proposed requests assigned to this provider
+      const myCounterProposed = data.filter(
+        (r) => r.status === 'counter_proposed' && r.assigned_provider_id === providerId
+      );
+
+      // Use proposal_history to detect whose turn it is — works on same-device
+      // testing and requires no secondary DB lookup.
+      // Provider's turn = last proposal came from fleet ('fleet_user')
+      // Provider waiting = last proposal came from provider ('service_provider')
+      const lastProposedBy = (r: typeof myCounterProposed[0]) => {
+        const h = r.proposal_history;
+        return h && h.length > 0 ? h[h.length - 1].proposed_by : null;
+      };
+
+      // Action Required: fleet was last to propose → provider must respond
+      const actionReqs = myCounterProposed.filter(
+        (r) => lastProposedBy(r) === 'fleet_user'
+      );
+
+      // Awaiting Response: provider was last to propose → waiting for fleet
+      const waitingReqs = myCounterProposed.filter(
+        (r) => lastProposedBy(r) === 'service_provider'
+      );
+
+      setIncoming(incomingReqs);
+      setActionRequired(actionReqs);
+      setAwaitingResponse(waitingReqs);
     } catch (err) {
       console.error('Failed to fetch service requests:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [providerId]);
 
   useEffect(() => {
     fetchRequests();
 
     if (!isSupabaseConfigured()) return;
 
-    // Real-time subscription for new/updated requests
-    const channel = subscribeToServiceRequests((payload) => {
-      console.log('Real-time update:', payload);
-      // Re-fetch to get fresh data
+    const channel = subscribeToServiceRequests(() => {
       fetchRequests();
     });
 
@@ -52,21 +82,34 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, on
     };
   }, [fetchRequests]);
 
-  const filteredRequests = filter === 'ALL'
-    ? requests
-    : requests.filter((r) => r.urgency === filter);
+  const applyFilter = (reqs: ServiceRequest[]) =>
+    filter === 'ALL' ? reqs : reqs.filter((r) => r.urgency === filter);
+
+  const totalCount = incoming.length + actionRequired.length + awaitingResponse.length;
 
   const filters: { id: UrgencyFilter; label: string }[] = [
     { id: 'ALL', label: 'All' },
-    { id: 'ERS', label: 'ERS' },
-    { id: 'DELAYED', label: 'Delayed' },
-    { id: 'SCHEDULED', label: 'Scheduled' },
+    { id: ServiceUrgency.ERS, label: 'ERS' },
+    { id: ServiceUrgency.DELAYED, label: 'Delayed' },
+    { id: ServiceUrgency.SCHEDULED, label: 'Scheduled' },
   ];
+
+  const sectionHeaderStyle = (color: string): React.CSSProperties => ({
+    fontSize: '13px',
+    fontWeight: '600',
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
+    color,
+    margin: '0 0 10px 0',
+    padding: '0 4px',
+  });
 
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
         background: isDark
           ? 'linear-gradient(180deg, #000000 0%, #1C1C1E 100%)'
           : 'linear-gradient(180deg, #F2F2F7 0%, #FFFFFF 100%)',
@@ -88,14 +131,8 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, on
         >
           Dashboard
         </h1>
-        <p
-          style={{
-            fontSize: '17px',
-            color: 'var(--label-secondary)',
-            margin: 0,
-          }}
-        >
-          {requests.length} incoming work order{requests.length !== 1 ? 's' : ''}
+        <p style={{ fontSize: '17px', color: 'var(--label-secondary)', margin: 0 }}>
+          {totalCount} work order{totalCount !== 1 ? 's' : ''}
         </p>
       </div>
 
@@ -128,9 +165,7 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, on
                   : isDark
                     ? 'rgba(28, 28, 30, 0.7)'
                     : 'rgba(255, 255, 255, 0.9)',
-                color: isActive
-                  ? '#FFFFFF'
-                  : 'var(--label-secondary)',
+                color: isActive ? '#FFFFFF' : 'var(--label-secondary)',
                 transition: 'background 0.2s ease, color 0.2s ease',
               }}
             >
@@ -140,61 +175,98 @@ export const ProviderDashboard: React.FC<ProviderDashboardProps> = ({ isDark, on
         })}
       </div>
 
-      {/* Request List */}
       <div
         style={{
           maxWidth: '640px',
           margin: '0 auto',
           padding: '0 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
         }}
       >
         {isLoading ? (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '48px 24px',
-              color: 'var(--label-tertiary)',
-              fontSize: '15px',
-            }}
-          >
+          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--label-tertiary)', fontSize: '15px' }}>
             Loading work orders...
           </div>
         ) : !isSupabaseConfigured() ? (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '48px 24px',
-              color: 'var(--label-tertiary)',
-              fontSize: '15px',
-            }}
-          >
-            Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment.
-          </div>
-        ) : filteredRequests.length === 0 ? (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '48px 24px',
-              color: 'var(--label-tertiary)',
-              fontSize: '15px',
-            }}
-          >
-            {filter === 'ALL'
-              ? 'No incoming work orders right now.'
-              : `No ${filter} work orders right now.`}
+          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--label-tertiary)', fontSize: '15px' }}>
+            Supabase is not configured.
           </div>
         ) : (
-          filteredRequests.map((request) => (
-            <WorkOrderCard
-              key={request.id}
-              request={request}
-              isDark={isDark}
-              onSelect={onSelectRequest}
-            />
-          ))
+          <>
+            {/* Action Required: fleet counter-proposed back, provider must respond */}
+            {applyFilter(actionRequired).length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={sectionHeaderStyle('#FF9500')}>Action Required</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {applyFilter(actionRequired).map((request) => (
+                    <WorkOrderCard
+                      key={request.id}
+                      request={request}
+                      isDark={isDark}
+                      onSelect={onSelectRequest}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Incoming: submitted, open for any provider to accept */}
+            {applyFilter(incoming).length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={sectionHeaderStyle('#007AFF')}>Incoming Requests</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {applyFilter(incoming).map((request) => (
+                    <WorkOrderCard
+                      key={request.id}
+                      request={request}
+                      isDark={isDark}
+                      onSelect={onSelectRequest}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Awaiting Response: provider proposed, waiting for fleet */}
+            {applyFilter(awaitingResponse).length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={sectionHeaderStyle('#8E8E93')}>Awaiting Fleet Response</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {applyFilter(awaitingResponse).map((request) => (
+                    <div key={request.id} style={{ position: 'relative' }}>
+                      <WorkOrderCard
+                        request={request}
+                        isDark={isDark}
+                        onSelect={onSelectRequest}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: '10px',
+                          left: '16px',
+                          fontSize: '12px',
+                          color: '#8E8E93',
+                          fontWeight: '500',
+                        }}
+                      >
+                        Waiting for acceptance
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {applyFilter(incoming).length === 0 &&
+              applyFilter(actionRequired).length === 0 &&
+              applyFilter(awaitingResponse).length === 0 && (
+              <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--label-tertiary)', fontSize: '15px' }}>
+                {filter === 'ALL'
+                  ? 'No incoming work orders right now.'
+                  : `No ${filter} work orders right now.`}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

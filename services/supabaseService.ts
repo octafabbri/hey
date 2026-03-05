@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
-import { ServiceRequest, ServiceRequestStatus, CounterProposal, UserRole } from '../types';
+import { ServiceRequest, ServiceRequestStatus, CounterProposal, UserRole, ProposalEntry } from '../types';
 
 // Initialize Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -119,6 +119,13 @@ interface ServiceRequestRow {
   accepted_at: string | null;
   completed_at: string | null;
   conversation_transcript: string | null;
+  // Scheduling workflow columns
+  proposed_date: string | null;
+  proposal_history: ProposalEntry[];
+  last_updated_by: string | null;
+  last_updated_by_name?: string;
+  last_updated_by_role?: string;
+  decline_reason: string | null;
 }
 
 const rowToServiceRequest = (row: ServiceRequestRow): ServiceRequest => ({
@@ -144,6 +151,12 @@ const rowToServiceRequest = (row: ServiceRequestRow): ServiceRequest => ({
   submitted_at: row.submitted_at ?? undefined,
   accepted_at: row.accepted_at ?? undefined,
   completed_at: row.completed_at ?? undefined,
+  proposed_date: row.proposed_date ?? undefined,
+  proposal_history: row.proposal_history ?? [],
+  last_updated_by: row.last_updated_by ?? undefined,
+  last_updated_by_name: row.last_updated_by_name ?? undefined,
+  last_updated_by_role: row.last_updated_by_role ?? undefined,
+  decline_reason: row.decline_reason ?? undefined,
 });
 
 const serviceRequestToRow = (request: ServiceRequest) => ({
@@ -154,7 +167,7 @@ const serviceRequestToRow = (request: ServiceRequest) => ({
   service_type: request.service_type,
   urgency: request.urgency,
   location: request.location,
-  vehicle_type: request.vehicle?.vehicle_type || '',
+  vehicle_type: request.vehicle?.vehicle_type || 'TRUCK',
   tire_info: request.tire_info || null,
   mechanical_info: request.mechanical_info || null,
   scheduled_date: request.scheduled_appointment?.scheduled_date || null,
@@ -167,6 +180,10 @@ const serviceRequestToRow = (request: ServiceRequest) => ({
   accepted_at: request.accepted_at || null,
   completed_at: request.completed_at || null,
   conversation_transcript: request.conversation_transcript || null,
+  proposed_date: request.proposed_date || null,
+  proposal_history: request.proposal_history || [],
+  last_updated_by: request.last_updated_by || null,
+  decline_reason: request.decline_reason || null,
 });
 
 export const submitServiceRequest = async (request: ServiceRequest): Promise<ServiceRequest | null> => {
@@ -223,7 +240,35 @@ export const getServiceRequests = async (filters?: {
     console.error('Get service requests failed:', error);
     return [];
   }
-  return (data || []).map(rowToServiceRequest);
+
+  const rows = data || [];
+
+  // Batch-resolve last_updated_by user info
+  const updaterIds = [...new Set(
+    rows.map((r: ServiceRequestRow) => r.last_updated_by).filter(Boolean)
+  )] as string[];
+
+  if (updaterIds.length > 0) {
+    const { data: users } = await client
+      .from('users')
+      .select('id, name, role')
+      .in('id', updaterIds);
+
+    if (users) {
+      const userMap = new Map(users.map((u: { id: string; name: string; role: string }) => [u.id, u]));
+      for (const row of rows) {
+        if (row.last_updated_by) {
+          const user = userMap.get(row.last_updated_by);
+          if (user) {
+            row.last_updated_by_name = user.name;
+            row.last_updated_by_role = user.role;
+          }
+        }
+      }
+    }
+  }
+
+  return rows.map(rowToServiceRequest);
 };
 
 export const getServiceRequest = async (id: string): Promise<ServiceRequest | null> => {
@@ -238,44 +283,126 @@ export const getServiceRequest = async (id: string): Promise<ServiceRequest | nu
     console.error('Get service request failed:', error);
     return null;
   }
+
+  // Resolve last_updated_by user info
+  if (data.last_updated_by) {
+    const { data: user } = await client
+      .from('users')
+      .select('name, role')
+      .eq('id', data.last_updated_by)
+      .single();
+    if (user) {
+      data.last_updated_by_name = user.name;
+      data.last_updated_by_role = user.role;
+    }
+  }
+
   return rowToServiceRequest(data);
 };
 
 export const acceptServiceRequest = async (
   id: string,
-  providerId: string,
-  providerName: string
-): Promise<boolean> => {
+  _providerId?: string,
+  _providerName?: string
+): Promise<ServiceRequest | null> => {
   const client = getSupabaseClient();
-  const { error } = await client
-    .from('service_requests')
-    .update({
-      status: 'accepted',
-      assigned_provider_id: providerId,
-      assigned_provider_name: providerName,
-      accepted_at: new Date().toISOString(),
-    })
-    .eq('id', id);
+  const { data, error } = await client.rpc('accept_service_request', {
+    p_request_id: id,
+  });
 
   if (error) {
     console.error('Accept service request failed:', error);
-    return false;
+    return null;
   }
-  return true;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
 };
 
-export const rejectServiceRequest = async (id: string): Promise<boolean> => {
+export const rejectServiceRequest = async (
+  id: string,
+  reason?: string
+): Promise<ServiceRequest | null> => {
   const client = getSupabaseClient();
-  const { error } = await client
-    .from('service_requests')
-    .update({ status: 'rejected' })
-    .eq('id', id);
+  const { data, error } = await client.rpc('decline_service_request', {
+    p_request_id: id,
+    p_reason: reason ?? null,
+  });
 
   if (error) {
-    console.error('Reject service request failed:', error);
-    return false;
+    console.error('Decline service request failed:', error);
+    return null;
   }
-  return true;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
+};
+
+export const proposeNewTime = async (
+  requestId: string,
+  newProposedDate: string,
+  notes?: string
+): Promise<ServiceRequest | null> => {
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc('propose_new_time', {
+    p_request_id: requestId,
+    p_new_proposed_date: newProposedDate,
+    p_notes: notes ?? null,
+  });
+
+  if (error) {
+    console.error('Propose new time failed:', error);
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
+};
+
+export const approveProposedTime = async (
+  requestId: string
+): Promise<ServiceRequest | null> => {
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc('approve_proposed_time', {
+    p_request_id: requestId,
+  });
+
+  if (error) {
+    console.error('Approve proposed time failed:', error);
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
+};
+
+export const rejectProposedTime = async (
+  requestId: string,
+  reason?: string
+): Promise<ServiceRequest | null> => {
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc('reject_proposed_time', {
+    p_request_id: requestId,
+    p_reason: reason ?? null,
+  });
+
+  if (error) {
+    console.error('Reject proposed time failed:', error);
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
+};
+
+export const completeServiceRequest = async (
+  requestId: string
+): Promise<ServiceRequest | null> => {
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc('complete_service_request', {
+    p_request_id: requestId,
+  });
+  if (error) {
+    console.error('Complete service request failed:', error);
+    return null;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? rowToServiceRequest(row) : null;
 };
 
 // ── Counter Proposals ──
@@ -412,7 +539,7 @@ export const rejectCounterProposal = async (
   const { error: srError } = await client
     .from('service_requests')
     .update({
-      status: 'counter_rejected',
+      status: 'submitted',
       assigned_provider_id: null,
       assigned_provider_name: null,
     })
@@ -475,4 +602,86 @@ export const subscribeToCounterProposals = (
 export const unsubscribe = (channel: RealtimeChannel): void => {
   const client = getSupabaseClient();
   client.removeChannel(channel);
+};
+
+// ── Server-Side Notifications ──
+
+export interface ServiceRequestNotification {
+  id: string;
+  request_id: string;
+  recipient_id: string;
+  actor_id: string;
+  event_type: string;
+  message: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export const getNotifications = async (
+  unreadOnly?: boolean
+): Promise<ServiceRequestNotification[]> => {
+  const client = getSupabaseClient();
+  let query = client
+    .from('service_request_notifications')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (unreadOnly) {
+    query = query.is('read_at', null);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Get notifications failed:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const markNotificationRead = async (notificationId: string): Promise<boolean> => {
+  const client = getSupabaseClient();
+  const { error } = await client
+    .from('service_request_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId);
+
+  if (error) {
+    console.error('Mark notification read failed:', error);
+    return false;
+  }
+  return true;
+};
+
+export const markAllNotificationsRead = async (): Promise<boolean> => {
+  const client = getSupabaseClient();
+  const userId = await getSessionUserId();
+  if (!userId) return false;
+
+  const { error } = await client
+    .from('service_request_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('recipient_id', userId)
+    .is('read_at', null);
+
+  if (error) {
+    console.error('Mark all notifications read failed:', error);
+    return false;
+  }
+  return true;
+};
+
+export const subscribeToNotifications = (
+  userId: string,
+  callback: (payload: unknown) => void
+): RealtimeChannel => {
+  const client = getSupabaseClient();
+  return client
+    .channel('my-notifications')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'service_request_notifications',
+      filter: `recipient_id=eq.${userId}`,
+    }, callback)
+    .subscribe();
 };

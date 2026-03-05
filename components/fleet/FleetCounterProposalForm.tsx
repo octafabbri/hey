@@ -2,26 +2,14 @@ import React, { useState } from 'react';
 import { ServiceRequest } from '../../types';
 import { ArrowLeft, Calendar, Clock, MessageSquare } from 'lucide-react';
 
-function formatDisplayDate(dateStr: string): string {
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const [year, month, day] = parts.map(Number);
-    const d = new Date(year, month - 1, day);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-    }
-  }
-  return dateStr;
-}
-
-interface CounterProposalFormProps {
+interface FleetCounterProposalFormProps {
   request: ServiceRequest;
   isDark: boolean;
   onBack: () => void;
   onSubmit: (data: { proposed_datetime: string; notes: string }) => void;
 }
 
-export const CounterProposalForm: React.FC<CounterProposalFormProps> = ({
+export const FleetCounterProposalForm: React.FC<FleetCounterProposalFormProps> = ({
   request,
   isDark,
   onBack,
@@ -29,17 +17,14 @@ export const CounterProposalForm: React.FC<CounterProposalFormProps> = ({
 }) => {
   const [proposedDate, setProposedDate] = useState('');
   const [proposedTime, setProposedTime] = useState('');
-  const [message, setMessage] = useState('');
+  const [notes, setNotes] = useState('');
 
   const canSubmit = proposedDate.trim() !== '' && proposedTime.trim() !== '';
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     const proposed_datetime = new Date(`${proposedDate}T${proposedTime}:00`).toISOString();
-    onSubmit({
-      proposed_datetime,
-      notes: message.trim(),
-    });
+    onSubmit({ proposed_datetime, notes: notes.trim() });
   };
 
   const inputStyle: React.CSSProperties = {
@@ -110,46 +95,37 @@ export const CounterProposalForm: React.FC<CounterProposalFormProps> = ({
             marginBottom: '8px',
           }}
         >
-          Counter-Propose
+          Propose Different Time
         </h1>
         <p style={{ fontSize: '15px', color: 'var(--label-secondary)', margin: 0 }}>
-          Suggest a different schedule for this work order
+          Suggest a new time back to the provider
         </p>
       </div>
 
       <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0 16px' }}>
-        {/* Current Proposal / Original Schedule */}
-        {request.proposed_date ? (
+        {/* Provider's Current Proposal */}
+        {request.proposed_date && (
           <div style={{ ...cardStyle, background: isDark ? 'rgba(255, 149, 0, 0.08)' : 'rgba(255, 149, 0, 0.05)' }}>
             <div style={{ fontSize: '13px', color: 'var(--label-tertiary)', marginBottom: '8px', textTransform: 'uppercase', fontWeight: '600' }}>
-              Current Proposal
+              Provider&apos;s Current Proposal
             </div>
             <div style={{ fontSize: '17px', color: isDark ? 'var(--label-primary)' : '#000000', fontWeight: '500' }}>
               {new Date(request.proposed_date).toLocaleString()}
             </div>
-            {request.last_updated_by_name && (
+            {request.assigned_provider_name && (
               <div style={{ fontSize: '13px', color: 'var(--label-tertiary)', marginTop: '4px' }}>
-                Proposed by {request.last_updated_by_name}
+                From: {request.assigned_provider_name}
               </div>
             )}
           </div>
-        ) : request.scheduled_appointment ? (
-          <div style={{ ...cardStyle, background: isDark ? 'rgba(0, 122, 255, 0.08)' : 'rgba(0, 122, 255, 0.05)' }}>
-            <div style={{ fontSize: '13px', color: 'var(--label-tertiary)', marginBottom: '8px', textTransform: 'uppercase', fontWeight: '600' }}>
-              Requested Schedule
-            </div>
-            <div style={{ fontSize: '17px', color: isDark ? 'var(--label-primary)' : '#000000', fontWeight: '500' }}>
-              {formatDisplayDate(request.scheduled_appointment.scheduled_date)} at {request.scheduled_appointment.scheduled_time}
-            </div>
-          </div>
-        ) : null}
+        )}
 
         {/* Proposed Date */}
         <div style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', marginBottom: '8px' }}>
             <Calendar size={14} style={{ color: 'var(--label-secondary)' }} />
             <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--label-secondary)', textTransform: 'uppercase' }}>
-              Proposed Date
+              Your Proposed Date
             </span>
           </div>
           <input
@@ -165,7 +141,7 @@ export const CounterProposalForm: React.FC<CounterProposalFormProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', marginBottom: '8px' }}>
             <Clock size={14} style={{ color: 'var(--label-secondary)' }} />
             <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--label-secondary)', textTransform: 'uppercase' }}>
-              Proposed Time
+              Your Proposed Time
             </span>
           </div>
           <input
@@ -176,17 +152,17 @@ export const CounterProposalForm: React.FC<CounterProposalFormProps> = ({
           />
         </div>
 
-        {/* Message */}
+        {/* Notes */}
         <div style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', marginBottom: '8px' }}>
             <MessageSquare size={14} style={{ color: 'var(--label-secondary)' }} />
             <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--label-secondary)', textTransform: 'uppercase' }}>
-              Message (Optional)
+              Notes (Optional)
             </span>
           </div>
           <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
             placeholder="Explain why you're suggesting a different time..."
             rows={3}
             style={{

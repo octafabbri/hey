@@ -11,7 +11,8 @@ export const loadUserProfile = (): UserProfile => {
     // Ensure moodHistory and serviceRequests are arrays and merge with defaults
     return {
         userName: storedProfile.userName,
-        voiceOutput: { ...DEFAULT_USER_PROFILE.voiceOutput, ...storedProfile.voiceOutput },
+        // Always force voice output on — it is not user-configurable
+        voiceOutput: { ...DEFAULT_USER_PROFILE.voiceOutput, ...storedProfile.voiceOutput, enabled: true },
         voiceInput: { ...DEFAULT_USER_PROFILE.voiceInput, ...storedProfile.voiceInput },
         moodHistory: Array.isArray(storedProfile.moodHistory) ? storedProfile.moodHistory : [],
         serviceRequests: Array.isArray(storedProfile.serviceRequests) ? storedProfile.serviceRequests : [],

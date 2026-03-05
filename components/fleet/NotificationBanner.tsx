@@ -1,21 +1,18 @@
 import React from 'react';
-import { Bell } from 'lucide-react';
+import { Bell, X } from 'lucide-react';
 
 interface NotificationBannerProps {
   count: number;
   isDark: boolean;
   onTap: () => void;
+  onDismiss?: () => void;
 }
 
-export const NotificationBanner: React.FC<NotificationBannerProps> = ({ count, isDark, onTap }) => {
+export const NotificationBanner: React.FC<NotificationBannerProps> = ({ count, isDark, onTap, onDismiss }) => {
   if (count === 0) return null;
 
   return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onTap();
-      }}
+    <div
       style={{
         position: 'fixed',
         top: '48px',
@@ -23,25 +20,65 @@ export const NotificationBanner: React.FC<NotificationBannerProps> = ({ count, i
         transform: 'translateX(-50%)',
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '10px 20px',
+        gap: '0',
         borderRadius: '999px',
         background: isDark ? 'rgba(255, 149, 0, 0.9)' : 'rgba(255, 149, 0, 0.95)',
         color: '#FFFFFF',
-        fontSize: '14px',
-        fontWeight: '600',
-        border: 'none',
-        cursor: 'pointer',
         zIndex: 90,
         boxShadow: '0 4px 16px rgba(255, 149, 0, 0.3)',
-        transition: 'transform 0.15s ease',
+        overflow: 'hidden',
       }}
-      onMouseDown={(e) => { e.currentTarget.style.transform = 'translateX(-50%) scale(0.95)'; }}
-      onMouseUp={(e) => { e.currentTarget.style.transform = 'translateX(-50%) scale(1)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateX(-50%) scale(1)'; }}
     >
-      <Bell size={16} />
-      {count} counter-proposal{count !== 1 ? 's' : ''} pending
-    </button>
+      {/* Main tap area */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onTap();
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '10px 16px 10px 20px',
+          background: 'transparent',
+          color: '#FFFFFF',
+          fontSize: '14px',
+          fontWeight: '600',
+          border: 'none',
+          cursor: 'pointer',
+        }}
+        onMouseDown={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+        onMouseUp={(e) => { e.currentTarget.style.opacity = '1'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+      >
+        <Bell size={16} />
+        {count} counter-proposal{count !== 1 ? 's' : ''} pending
+      </button>
+
+      {/* X dismiss button */}
+      {onDismiss && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss();
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '10px 14px 10px 8px',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'rgba(255,255,255,0.8)',
+          }}
+          onMouseDown={(e) => { e.currentTarget.style.color = '#FFFFFF'; }}
+          onMouseUp={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)'; }}
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
   );
 };

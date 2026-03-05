@@ -21,14 +21,20 @@ import { loadUserProfile, saveUserProfile, addMoodEntry } from '../../services/u
 import { createServiceRequest, validateServiceRequest, addServiceRequest } from '../../services/serviceRequestService';
 import { generateServiceRequestPDF, downloadPDF } from '../../services/pdfService';
 import { isSupabaseConfigured, submitServiceRequest as submitToSupabase } from '../../services/supabaseService';
+import { useSupabaseAuth } from '../../hooks/useSupabaseAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useServiceRequests } from '../../hooks/useServiceRequests';
 import { NotificationBanner } from './NotificationBanner';
-import { WorkOrderHistory } from './WorkOrderHistory';
+import { NotificationsView } from './NotificationsView';
 import { CounterProposalReview } from './CounterProposalReview';
+import { FleetCounterProposalForm } from './FleetCounterProposalForm';
+import { RequestDetailModal } from './RequestDetailModal';
+import { NotificationToast } from '../NotificationToast';
+import { proposeNewTime, approveProposedTime, rejectProposedTime } from '../../services/supabaseService';
+import { WorkOrderCoordinationAgent, parseNaturalDate, parseTimeString } from '../../services/coordinationAgentService';
 
 type AssistantState = 'idle' | 'listening' | 'processing' | 'responding' | 'urgent' | 'resolution' | 'pdf-generating' | 'pdf-ready';
-type NavigationTab = 'home' | 'contacts' | 'settings';
+type NavigationTab = 'home' | 'notifications' | 'settings';
 type InputMode = 'voice' | 'chat';
 
 interface FleetAppProps {
@@ -76,6 +82,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
   const [completedServiceRequest, setCompletedServiceRequest] = useState<ServiceRequest | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const [isAwaitingWorkOrderPrompt, setIsAwaitingWorkOrderPrompt] = useState(false);
+  const [isAwaitingSummaryPrompt, setIsAwaitingSummaryPrompt] = useState(false);
 
   // Chat History (shared between voice and chat modes)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -83,10 +90,20 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
   // Offline Detection
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
+  // Supabase Auth — ensures anonymous session exists before submitting requests
+  const { userId: supabaseUserId } = useSupabaseAuth();
+
   // Notifications & Work Order History
-  const { unreadCount, refresh: refreshNotifications } = useNotifications();
-  const { requests: myRequests, isLoading: isLoadingRequests, refresh: refreshRequests } = useServiceRequests();
+  const { notifications, unreadCount, refresh: refreshNotifications, markAllRead, activeToast, dismissToast } = useNotifications(supabaseUserId);
+  const { requests: myRequests, isLoading: isLoadingRequests, refresh: refreshRequests } = useServiceRequests(supabaseUserId);
   const [reviewingRequest, setReviewingRequest] = useState<ServiceRequest | null>(null);
+  const [counterProposingRequest, setCounterProposingRequest] = useState<ServiceRequest | null>(null);
+  const [detailRequest, setDetailRequest] = useState<ServiceRequest | null>(null);
+
+  // Voice-based counter-proposal review
+  const [voiceReviewRequest, setVoiceReviewRequest] = useState<ServiceRequest | null>(null);
+  const [awaitingVoiceCtx, setAwaitingVoiceCtx] = useState<'command' | 'counter-date' | 'counter-time' | null>(null);
+  const [voiceCounterDate, setVoiceCounterDate] = useState('');
 
   // Refs
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -97,11 +114,19 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
   const inputModeRef = useRef<InputMode>('voice');
   const assistantStartedRef = useRef(false);
   const toggleListenRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const voiceReviewRequestRef = useRef<ServiceRequest | null>(null);
+  const awaitingVoiceCtxRef = useRef<'command' | 'counter-date' | 'counter-time' | null>(null);
+  const voiceCounterDateRef = useRef('');
+  const myRequestsRef = useRef<ServiceRequest[]>([]);
 
   // Keep refs in sync for use inside async callbacks (avoids stale closures)
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
   useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
   useEffect(() => { assistantStartedRef.current = assistantStarted; }, [assistantStarted]);
+  useEffect(() => { voiceReviewRequestRef.current = voiceReviewRequest; }, [voiceReviewRequest]);
+  useEffect(() => { awaitingVoiceCtxRef.current = awaitingVoiceCtx; }, [awaitingVoiceCtx]);
+  useEffect(() => { voiceCounterDateRef.current = voiceCounterDate; }, [voiceCounterDate]);
+  useEffect(() => { myRequestsRef.current = myRequests; }, [myRequests]);
 
   useEffect(() => {
     if (isDark) {
@@ -168,12 +193,9 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     } finally {
       setIsSpeaking(false);
       setIsResponseComplete(true);
-
-      if (assistantStartedRef.current && !isListeningRef.current && inputModeRef.current === 'voice') {
-        setTimeout(() => {
-          toggleListenRef.current();
-        }, 500);
-      }
+      // Auto-listen intentionally removed. AudioBufferSourceNode.onended fires
+      // before the audio pipeline finishes rendering, so the mic would open while
+      // speech is still audible. User taps the orb to speak instead.
     }
   }, [userProfile.voiceOutput]);
 
@@ -290,6 +312,21 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     };
   };
 
+  const formatDateForSpeech = (dateStr: string): string => {
+    // Parse YYYY-MM-DD format into a speech-friendly string
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [year, month, day] = parts.map(Number);
+    const date = new Date(year, month - 1, day);
+    if (isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  };
+
   const buildConfirmationSummary = (request: ServiceRequest): string => {
     const vehicleType = request.vehicle.vehicle_type?.toLowerCase() || 'vehicle';
     const urgencyText = request.urgency === 'ERS' ? 'emergency same-day' : request.urgency === 'DELAYED' ? 'next-day' : 'scheduled';
@@ -315,10 +352,11 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     summary += `Priority, ${urgencyText}. `;
 
     if (request.urgency === 'SCHEDULED' && request.scheduled_appointment) {
-      summary += `Scheduled for ${request.scheduled_appointment.scheduled_date} at ${request.scheduled_appointment.scheduled_time}. `;
+      const dateDisplay = formatDateForSpeech(request.scheduled_appointment.scheduled_date);
+      summary += `Scheduled for ${dateDisplay} at ${request.scheduled_appointment.scheduled_time}. `;
     }
 
-    summary += `Does everything look right, or do you need to change anything?`;
+    summary += `Say yes to submit, or tell me what needs to change.`;
     return summary;
   };
 
@@ -350,6 +388,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     setIsServiceRequestActive(false);
     setActiveServiceRequest(null);
     setIsAwaitingConfirmation(false);
+    setIsAwaitingSummaryPrompt(false);
   }, [userProfile, speakAiResponse, addMessage]);
 
   const startServiceRequest = useCallback(async (initialMessage: string) => {
@@ -383,10 +422,10 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
 
       const validation = validateServiceRequest(updatedRequest);
       if (validation.isComplete) {
-        const summary = buildConfirmationSummary(updatedRequest);
-        addMessage('ai', summary);
-        speakAiResponse(summary);
-        setIsAwaitingConfirmation(true);
+        const prompt = "Want me to read back the details before submitting?";
+        addMessage('ai', prompt);
+        speakAiResponse(prompt);
+        setIsAwaitingSummaryPrompt(true);
       } else {
         speakAiResponse(aiText);
       }
@@ -403,6 +442,34 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
 
   const handleServiceRequestResponse = useCallback(async (text: string) => {
     if (!serviceRequestSession || !activeServiceRequest) return;
+
+    // Handle "want to hear the details?" response
+    if (isAwaitingSummaryPrompt) {
+      const lowerText = text.toLowerCase();
+      const wantsSummary = CONFIRMATION_KEYWORDS.some(kw => lowerText.includes(kw));
+      const skipsSummary = ['no', 'nah', 'nope', 'skip', 'no thanks', 'just submit', 'submit'].some(kw => lowerText.includes(kw));
+
+      if (wantsSummary && !skipsSummary) {
+        setIsAwaitingSummaryPrompt(false);
+        setIsAwaitingConfirmation(true);
+        const summary = buildConfirmationSummary(activeServiceRequest);
+        addMessage('ai', summary);
+        speakAiResponse(summary);
+        return;
+      } else if (skipsSummary) {
+        setIsAwaitingSummaryPrompt(false);
+        setIsAwaitingWorkOrderPrompt(true);
+        const submitPrompt = "Ready to submit your request?";
+        addMessage('ai', submitPrompt);
+        speakAiResponse(submitPrompt);
+        return;
+      }
+      // Ambiguous — re-ask
+      const retryMsg = "Want me to read back the details before we submit? Say yes or no.";
+      addMessage('ai', retryMsg);
+      speakAiResponse(retryMsg);
+      return;
+    }
 
     // Handle work order prompt response
     if (isAwaitingWorkOrderPrompt) {
@@ -423,7 +490,11 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
         setIsAwaitingWorkOrderPrompt(false);
         return;
       }
-      setIsAwaitingWorkOrderPrompt(false);
+      // Ambiguous response — re-ask
+      const retryMsg = "Just to confirm — would you like me to generate a work order? Yes or no?";
+      addMessage('ai', retryMsg);
+      speakAiResponse(retryMsg);
+      return;
     }
 
     // Handle confirmation response
@@ -434,14 +505,20 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
 
       if (isConfirmed && !wantsEdit) {
         setIsAwaitingConfirmation(false);
-        setIsAwaitingWorkOrderPrompt(true);
-        const workOrderPrompt = "Everything checks out. Would you like me to generate a work order for this?";
-        addMessage('ai', workOrderPrompt);
-        speakAiResponse(workOrderPrompt);
+        finalizeServiceRequest(activeServiceRequest);
         return;
       }
 
-      setIsAwaitingConfirmation(false);
+      if (wantsEdit) {
+        // User wants to change something — fall through to AI conversation
+        setIsAwaitingConfirmation(false);
+      } else {
+        // Ambiguous response — re-ask
+        const retryMsg = "Does everything look right? Say yes to confirm or let me know what needs to change.";
+        addMessage('ai', retryMsg);
+        speakAiResponse(retryMsg);
+        return;
+      }
     }
 
     setIsLoadingAI(true);
@@ -470,10 +547,10 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       addMessage('ai', aiText);
 
       if (validation.isComplete) {
-        const summary = buildConfirmationSummary(updatedRequest);
-        addMessage('ai', summary);
-        speakAiResponse(summary);
-        setIsAwaitingConfirmation(true);
+        const prompt = "Want me to read back the details before submitting?";
+        addMessage('ai', prompt);
+        speakAiResponse(prompt);
+        setIsAwaitingSummaryPrompt(true);
       } else {
         speakAiResponse(aiText);
       }
@@ -485,7 +562,183 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     } finally {
       setIsLoadingAI(false);
     }
-  }, [serviceRequestSession, activeServiceRequest, isAwaitingConfirmation, isAwaitingWorkOrderPrompt, userProfile, speakAiResponse, addMessage, finalizeServiceRequest]);
+  }, [serviceRequestSession, activeServiceRequest, isAwaitingConfirmation, isAwaitingWorkOrderPrompt, isAwaitingSummaryPrompt, userProfile, speakAiResponse, addMessage, finalizeServiceRequest]);
+
+  // ── Voice-based counter-proposal review ────────────────────────────────────
+
+  const startVoiceReview = useCallback(async (request: ServiceRequest) => {
+    setVoiceReviewRequest(request);
+    setAwaitingVoiceCtx('command');
+    setIsLoadingAI(true);
+    try {
+      const agent = new WorkOrderCoordinationAgent(request, 'fleet_user', userProfile.userName || 'Fleet');
+      const summary = await agent.getRequestSummary();
+      handleAiResponseDisplay(summary);
+    } catch (err) {
+      console.error('startVoiceReview error:', err);
+      handleAiResponseDisplay('Having trouble reading that proposal. Check the notifications tab.');
+    } finally {
+      setIsLoadingAI(false);
+    }
+  }, [handleAiResponseDisplay, userProfile.userName]);
+
+  const handleVoiceReviewInput = useCallback(async (text: string) => {
+    const lower = text.toLowerCase().trim();
+    const ctx = awaitingVoiceCtxRef.current;
+    const req = voiceReviewRequestRef.current;
+    if (!req) return;
+
+    const resetVoiceReview = () => {
+      setVoiceReviewRequest(null);
+      setAwaitingVoiceCtx(null);
+      setVoiceCounterDate('');
+    };
+
+    setIsLoadingAI(true);
+    try {
+      if (ctx === 'command') {
+        // Accept
+        if (/(^|\b)(accept|approve|sounds good|works for me|go ahead|yes|that works|confirmed|do it)(\b|$)/.test(lower)) {
+          await approveProposedTime(req.id);
+          resetVoiceReview();
+          refreshNotifications();
+          refreshRequests();
+          const readable = req.proposed_date
+            ? new Date(req.proposed_date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+            : 'the proposed time';
+          handleAiResponseDisplay(`Done. Accepted ${readable} with ${req.assigned_provider_name || 'the provider'}. Your work order is confirmed.`);
+          return;
+        }
+        // Decline
+        if (/(^|\b)(decline|reject|no$|pass|won't work|can't make|not good|different)(\b|$)/.test(lower)) {
+          await rejectProposedTime(req.id);
+          resetVoiceReview();
+          refreshNotifications();
+          refreshRequests();
+          handleAiResponseDisplay("Declined. The request has been reopened for other providers to respond.");
+          return;
+        }
+        // Counter-propose
+        if (/(counter|propose|different time|how about|reschedule|try|offer|suggest)/.test(lower)) {
+          // Try to parse inline date+time (e.g. "counter, how about next Tuesday at 2pm")
+          const atIdx = lower.indexOf(' at ');
+          const datePart = atIdx !== -1 ? text.substring(0, atIdx) : text;
+          const parsedDate = parseNaturalDate(datePart) || parseNaturalDate(text);
+          if (parsedDate) {
+            const parsedTime = atIdx !== -1 ? parseTimeString(text.substring(atIdx + 4)) : null;
+            if (parsedTime) {
+              const isoDatetime = new Date(`${parsedDate}T${parsedTime}:00`).toISOString();
+              await proposeNewTime(req.id, isoDatetime, '');
+              resetVoiceReview();
+              refreshNotifications();
+              refreshRequests();
+              const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+              handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
+              return;
+            }
+            setVoiceCounterDate(parsedDate);
+            setAwaitingVoiceCtx('counter-time');
+            handleAiResponseDisplay('What time works for you?');
+            return;
+          }
+          setAwaitingVoiceCtx('counter-date');
+          handleAiResponseDisplay('What date works for you?');
+          return;
+        }
+        // Skip/dismiss
+        if (/(^|\b)(skip|later|not now|dismiss|move on|never mind)(\b|$)/.test(lower)) {
+          resetVoiceReview();
+          handleAiResponseDisplay("No problem — it'll be in your notifications whenever you're ready.");
+          return;
+        }
+        // General question — pass to coordination agent
+        const agent = new WorkOrderCoordinationAgent(req, 'fleet_user', userProfile.userName || 'Fleet');
+        const response = await agent.sendMessage(text);
+        handleAiResponseDisplay(response);
+        return;
+      }
+
+      if (ctx === 'counter-date') {
+        const atIdx = lower.indexOf(' at ');
+        const datePart = atIdx !== -1 ? text.substring(0, atIdx).trim() : text;
+        const parsedDate = parseNaturalDate(datePart) || parseNaturalDate(text);
+        if (parsedDate) {
+          const parsedTime = atIdx !== -1 ? parseTimeString(text.substring(atIdx + 4)) : null;
+          if (parsedTime) {
+            const isoDatetime = new Date(`${parsedDate}T${parsedTime}:00`).toISOString();
+            await proposeNewTime(req.id, isoDatetime, '');
+            resetVoiceReview();
+            refreshNotifications();
+            refreshRequests();
+            const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+            handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
+            return;
+          }
+          setVoiceCounterDate(parsedDate);
+          setAwaitingVoiceCtx('counter-time');
+          handleAiResponseDisplay('What time works?');
+        } else {
+          handleAiResponseDisplay("Didn't catch that date. Try something like next Tuesday or March 10th.");
+        }
+        return;
+      }
+
+      if (ctx === 'counter-time') {
+        const parsedTime = parseTimeString(text);
+        if (parsedTime) {
+          const isoDatetime = new Date(`${voiceCounterDateRef.current}T${parsedTime}:00`).toISOString();
+          await proposeNewTime(req.id, isoDatetime, '');
+          resetVoiceReview();
+          refreshNotifications();
+          refreshRequests();
+          const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+          handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
+        } else {
+          handleAiResponseDisplay("What time works? Try something like 2 PM or 9 in the morning.");
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('handleVoiceReviewInput error:', err);
+      handleAiResponseDisplay('Something went wrong. You can manage this from the notifications tab.');
+      resetVoiceReview();
+    } finally {
+      setIsLoadingAI(false);
+    }
+  }, [handleAiResponseDisplay, refreshNotifications, refreshRequests, userProfile.userName]);
+
+  const handleStatusQuery = useCallback(async () => {
+    const all = myRequestsRef.current;
+    // Find counter-proposals from provider that fleet needs to respond to
+    const pendingReviews = all.filter(r => {
+      const lastBy = r.proposal_history?.slice(-1)[0]?.proposed_by;
+      return r.status === 'counter_proposed' && lastBy === 'service_provider';
+    });
+
+    if (pendingReviews.length > 0) {
+      await startVoiceReview(pendingReviews[0]);
+      return;
+    }
+
+    setIsLoadingAI(true);
+    try {
+      const active = all.filter(r => !['completed', 'cancelled', 'rejected'].includes(r.status));
+      if (active.length === 0) {
+        handleAiResponseDisplay(all.length === 0
+          ? "You don't have any service requests yet."
+          : "All your service requests have been resolved.");
+        return;
+      }
+      const agent = new WorkOrderCoordinationAgent(active[0], 'fleet_user', userProfile.userName || 'Fleet', active);
+      const summary = await agent.sendMessage('Give me a brief status update on all my active service requests.');
+      handleAiResponseDisplay(summary);
+    } catch (err) {
+      console.error('handleStatusQuery error:', err);
+      handleAiResponseDisplay('Having trouble checking status right now. Try the notifications tab.');
+    } finally {
+      setIsLoadingAI(false);
+    }
+  }, [startVoiceReview, handleAiResponseDisplay, userProfile.userName]);
 
   const processUserInput = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -529,8 +782,21 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       return;
     }
 
+    // Route to voice counter-proposal review when active
+    if (awaitingVoiceCtxRef.current !== null) {
+      handleVoiceReviewInput(text);
+      return;
+    }
+
     setIsLoadingAI(true);
     const lowerText = text.toLowerCase();
+
+    // Detect status / update queries ("any updates?", "any counter-proposals?", etc.)
+    if (/(any update|any response|counter.?proposal|did.*respond|status of my|check.*request|what.*status|what happened)/i.test(lowerText)) {
+      setIsLoadingAI(false);
+      handleStatusQuery();
+      return;
+    }
 
     // Check for service request keywords
     if (SERVICE_REQUEST_KEYWORDS.some(kw => lowerText.includes(kw))) {
@@ -574,7 +840,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     apiKeyError, generalChatSession, handleAiResponseDisplay,
     isWellnessCheckinActive, handleWellnessCheckinResponse, startWellnessCheckin,
     isServiceRequestActive, handleServiceRequestResponse, startServiceRequest,
-    userProfile, isAskingName
+    userProfile, isAskingName, handleVoiceReviewInput, handleStatusQuery,
   ]);
 
   const toggleListen = useCallback(async () => {
@@ -700,6 +966,31 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     }
   };
 
+  // Fleet Counter-Proposal Form (overlay — propose different time)
+  if (counterProposingRequest) {
+    return (
+      <>
+        <FleetCounterProposalForm
+          request={counterProposingRequest}
+          isDark={isDark}
+          onBack={() => setCounterProposingRequest(null)}
+          onSubmit={async (data) => {
+            try {
+              await proposeNewTime(counterProposingRequest.id, data.proposed_datetime, data.notes || undefined);
+              setCounterProposingRequest(null);
+              setReviewingRequest(null);
+              refreshNotifications();
+              refreshRequests();
+            } catch (err) {
+              console.error('Failed to propose new time:', err);
+            }
+          }}
+        />
+        <BottomMenuBar isDark={isDark} role="fleet" activeTab={currentTab} badgeCount={unreadCount} onNavigate={(tab) => { setCounterProposingRequest(null); setReviewingRequest(null); if (tab === 'notifications') markAllRead(); setCurrentTab(tab as NavigationTab); }} />
+      </>
+    );
+  }
+
   // Counter-Proposal Review (overlay)
   if (reviewingRequest) {
     return (
@@ -713,27 +1004,55 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
             refreshNotifications();
             refreshRequests();
           }}
+          onProposeDifferentTime={(req) => setCounterProposingRequest(req)}
         />
-        <BottomMenuBar isDark={isDark} role="fleet" onNavigate={(tab) => { setReviewingRequest(null); setCurrentTab(tab as NavigationTab); }} />
+        <BottomMenuBar isDark={isDark} role="fleet" activeTab={currentTab} badgeCount={unreadCount} onNavigate={(tab) => { setReviewingRequest(null); if (tab === 'notifications') markAllRead(); setCurrentTab(tab as NavigationTab); }} />
       </>
     );
   }
 
-  // Contacts / Work Order History tab
-  if (currentTab === 'contacts') {
+  // Notifications tab
+  if (currentTab === 'notifications') {
     return (
       <>
-        <WorkOrderHistory
+        <NotificationsView
+          notifications={notifications}
           requests={myRequests}
           isDark={isDark}
           isLoading={isLoadingRequests}
-          onSelectRequest={(req) => {
+          onReviewCounterProposal={(req) => {
             if (req.status === 'counter_proposed') {
               setReviewingRequest(req);
             }
           }}
+          onViewDetail={(req) => {
+            // Use proposal_history to detect fleet's turn — works on same-device testing
+            const lastBy = req.proposal_history?.length
+              ? req.proposal_history[req.proposal_history.length - 1].proposed_by
+              : null;
+            if (req.status === 'counter_proposed' && lastBy === 'service_provider') {
+              setReviewingRequest(req);
+            } else {
+              setDetailRequest(req);
+            }
+          }}
         />
-        <BottomMenuBar isDark={isDark} role="fleet" onNavigate={(tab) => setCurrentTab(tab as NavigationTab)} />
+        {detailRequest && (
+          <RequestDetailModal
+            request={detailRequest}
+            isDark={isDark}
+            onClose={() => setDetailRequest(null)}
+            onReviewCounterProposal={(() => {
+              if (detailRequest.status !== 'counter_proposed') return undefined;
+              const lastBy = detailRequest.proposal_history?.length
+                ? detailRequest.proposal_history[detailRequest.proposal_history.length - 1].proposed_by
+                : null;
+              if (lastBy !== 'service_provider') return undefined;
+              return () => { setDetailRequest(null); setReviewingRequest(detailRequest); };
+            })()}
+          />
+        )}
+        <BottomMenuBar isDark={isDark} role="fleet" activeTab={currentTab} badgeCount={unreadCount} onNavigate={(tab) => { if (tab === 'notifications') markAllRead(); setCurrentTab(tab as NavigationTab); }} />
       </>
     );
   }
@@ -751,6 +1070,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
               ...userProfile,
               voiceOutput: {
                 ...userProfile.voiceOutput,
+                enabled: true,
                 voiceURI: settings.voicePersona,
               },
               voiceInput: {
@@ -768,6 +1088,8 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
         <BottomMenuBar
           isDark={isDark}
           role="fleet"
+          activeTab={currentTab}
+          badgeCount={unreadCount}
           onNavigate={(tab) => setCurrentTab(tab as NavigationTab)}
         />
       </>
@@ -798,7 +1120,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
             </div>
           </div>
         </div>
-        <BottomMenuBar isDark={isDark} role="fleet" onNavigate={(tab) => setCurrentTab(tab as NavigationTab)} />
+        <BottomMenuBar isDark={isDark} role="fleet" activeTab={currentTab} badgeCount={unreadCount} onNavigate={(tab) => { if (tab === 'notifications') markAllRead(); setCurrentTab(tab as NavigationTab); }} />
       </>
     );
   }
@@ -839,7 +1161,18 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
         <NotificationBanner
           count={unreadCount}
           isDark={isDark}
-          onTap={() => setCurrentTab('contacts')}
+          onTap={() => { markAllRead(); setCurrentTab('notifications'); }}
+          onDismiss={markAllRead}
+        />
+      )}
+
+      {/* Realtime Toast Alert */}
+      {activeToast && (
+        <NotificationToast
+          toast={activeToast}
+          isDark={isDark}
+          onDismiss={dismissToast}
+          onTap={() => setCurrentTab('notifications')}
         />
       )}
 
@@ -898,6 +1231,8 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       <BottomMenuBar
         isDark={isDark}
         role="fleet"
+        activeTab={currentTab}
+        badgeCount={unreadCount}
         onNavigate={(tab) => {
           if (tab === 'home') {
             setAssistantStarted(false);
@@ -907,6 +1242,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
             setTranscription('');
             stopAudioPlayback();
           }
+          if (tab === 'notifications') markAllRead();
           setCurrentTab(tab as NavigationTab);
         }}
       />

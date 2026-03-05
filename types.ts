@@ -182,6 +182,21 @@ export interface ServiceRequest {
   submitted_at?: string;
   accepted_at?: string;
   completed_at?: string;
+
+  // Scheduling workflow (proposal negotiation)
+  proposed_date?: string;           // Currently active proposed date/time (ISO 8601)
+  proposal_history?: ProposalEntry[]; // Audit log of all proposals
+  last_updated_by?: string;         // User ID of whoever last changed the status
+  last_updated_by_name?: string;    // Display name resolved from users table
+  last_updated_by_role?: string;    // 'fleet' | 'provider' resolved from users table
+  decline_reason?: string;          // Reason given when provider declines
+}
+
+export interface ProposalEntry {
+  proposed_by: 'fleet_user' | 'service_provider';
+  proposed_at: string;   // ISO 8601 timestamp
+  proposed_date: string;  // ISO 8601 timestamp
+  notes?: string;
 }
 
 export interface ActiveModalInfo {

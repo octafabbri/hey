@@ -1,32 +1,81 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ServiceRequest } from '../../types';
 import { BottomMenuBar } from '../BottomMenuBar';
 import { ProviderDashboard } from './ProviderDashboard';
 import { WorkOrderDetail } from './WorkOrderDetail';
 import { CounterProposalForm } from './CounterProposalForm';
+import { DeclineReasonForm } from './DeclineReasonForm';
 import { ActiveJobs } from './ActiveJobs';
 import { ProviderSettings } from './ProviderSettings';
+import { ProviderVoiceAssistant } from './ProviderVoiceAssistant';
+
+const PROVIDER_SETTINGS_KEY = 'provider_voice_settings';
+
+interface ProviderVoiceSettings {
+  voiceURI: string;
+  language: string;
+}
+
+function loadProviderSettings(): ProviderVoiceSettings {
+  try {
+    const stored = localStorage.getItem(PROVIDER_SETTINGS_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return { voiceURI: 'onyx', language: 'en-US' };
+}
+
+function saveProviderSettings(settings: ProviderVoiceSettings): void {
+  try {
+    localStorage.setItem(PROVIDER_SETTINGS_KEY, JSON.stringify(settings));
+  } catch { /* ignore */ }
+}
 import { useSupabaseAuth } from '../../hooks/useSupabaseAuth';
+import { useNotifications } from '../../hooks/useNotifications';
+import { NotificationToast } from '../NotificationToast';
 import {
   isSupabaseConfigured,
   acceptServiceRequest,
   rejectServiceRequest,
-  createCounterProposal,
+  proposeNewTime,
+  completeServiceRequest,
+  getServiceRequests,
+  subscribeToServiceRequests,
 } from '../../services/supabaseService';
 
-type ProviderTab = 'dashboard' | 'active' | 'settings';
-type ProviderView = 'list' | 'detail' | 'counter-propose';
+type ProviderTab = 'dashboard' | 'active' | 'assistant' | 'settings';
+type ProviderView = 'list' | 'detail' | 'counter-propose' | 'decline';
 
 interface ProviderAppProps {
   onSwitchRole: () => void;
 }
 
 export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
-  const [currentTab, setCurrentTab] = useState<ProviderTab>('dashboard');
+  const [currentTab, setCurrentTab] = useState<ProviderTab>('assistant');
   const [currentView, setCurrentView] = useState<ProviderView>('list');
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
+  const [assistantBadgeCount, setAssistantBadgeCount] = useState(0);
+  const [providerSettings, setProviderSettings] = useState<ProviderVoiceSettings>(loadProviderSettings);
   const isDark = false; // Match fleet: always light mode
   const { userId } = useSupabaseAuth();
+  const { activeToast, dismissToast } = useNotifications(userId);
+
+  // Fetch pending request count for the Assistant tab badge
+  const fetchAssistantBadge = useCallback(async () => {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const data = await getServiceRequests({ status: ['submitted', 'counter_proposed'] });
+      setAssistantBadgeCount(data.length);
+    } catch {
+      // badge count is best-effort
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAssistantBadge();
+    if (!isSupabaseConfigured()) return;
+    const channel = subscribeToServiceRequests(fetchAssistantBadge);
+    return () => { channel?.unsubscribe(); };
+  }, [fetchAssistantBadge]);
 
   const handleSelectRequest = (request: ServiceRequest) => {
     setSelectedRequest(request);
@@ -49,14 +98,29 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
     }
   };
 
-  const handleReject = async (request: ServiceRequest) => {
-    if (!isSupabaseConfigured()) return;
+  const handleReject = (request: ServiceRequest) => {
+    setSelectedRequest(request);
+    setCurrentView('decline');
+  };
+
+  const handleConfirmDecline = async (reason: string) => {
+    if (!isSupabaseConfigured() || !selectedRequest) return;
 
     try {
-      await rejectServiceRequest(request.id);
+      await rejectServiceRequest(selectedRequest.id, reason || undefined);
       handleBack();
     } catch (err) {
-      console.error('Failed to reject request:', err);
+      console.error('Failed to decline request:', err);
+    }
+  };
+
+  const handleComplete = async (request: ServiceRequest) => {
+    if (!isSupabaseConfigured()) return;
+    try {
+      await completeServiceRequest(request.id);
+      handleBack();
+    } catch (err) {
+      console.error('Failed to complete request:', err);
     }
   };
 
@@ -66,24 +130,46 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
   };
 
   const handleSubmitCounterProposal = async (data: {
-    proposed_date: string;
-    proposed_time: string;
-    message: string;
+    proposed_datetime: string;
+    notes: string;
   }) => {
-    if (!isSupabaseConfigured() || !selectedRequest || !userId) return;
+    if (!isSupabaseConfigured() || !selectedRequest) return;
 
     try {
-      await createCounterProposal(selectedRequest.id, {
-        provider_id: userId,
-        provider_name: 'Provider',
-        proposed_date: data.proposed_date,
-        proposed_time: data.proposed_time,
-        message: data.message,
-      });
+      await proposeNewTime(
+        selectedRequest.id,
+        data.proposed_datetime,
+        data.notes || undefined
+      );
       handleBack();
     } catch (err) {
       console.error('Failed to submit counter-proposal:', err);
     }
+  };
+
+  // Voice-assistant-specific handlers (no navigation side-effects)
+  const handleVoiceAccept = async (request: ServiceRequest) => {
+    if (!isSupabaseConfigured() || !userId) return;
+    await acceptServiceRequest(request.id, userId, 'Provider');
+  };
+
+  const handleVoiceReject = async (requestId: string, reason: string) => {
+    if (!isSupabaseConfigured()) return;
+    await rejectServiceRequest(requestId, reason || undefined);
+  };
+
+  const handleVoiceCounter = async (
+    requestId: string,
+    data: { proposed_datetime: string; notes: string }
+  ) => {
+    if (!isSupabaseConfigured()) return;
+    await proposeNewTime(requestId, data.proposed_datetime, data.notes || undefined);
+  };
+
+  const handleSaveSettings = (settings: { voicePersona: string; language: string }) => {
+    const updated = { voiceURI: settings.voicePersona, language: settings.language };
+    setProviderSettings(updated);
+    saveProviderSettings(updated);
   };
 
   const handleNavigate = (tab: string) => {
@@ -103,6 +189,7 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
           onAccept={handleAccept}
           onReject={handleReject}
           onCounterPropose={handleCounterPropose}
+          onComplete={handleComplete}
         />
       );
     }
@@ -118,12 +205,24 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
       );
     }
 
+    if (currentView === 'decline' && selectedRequest) {
+      return (
+        <DeclineReasonForm
+          request={selectedRequest}
+          isDark={isDark}
+          onBack={() => setCurrentView('detail')}
+          onSubmit={handleConfirmDecline}
+        />
+      );
+    }
+
     // Tab views
     switch (currentTab) {
       case 'dashboard':
         return (
           <ProviderDashboard
             isDark={isDark}
+            providerId={userId || ''}
             onSelectRequest={handleSelectRequest}
           />
         );
@@ -135,8 +234,28 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
             onSelectRequest={handleSelectRequest}
           />
         );
+      case 'assistant':
+        return (
+          <ProviderVoiceAssistant
+            isDark={isDark}
+            userId={userId}
+            voiceName={providerSettings.voiceURI}
+            language={providerSettings.language}
+            onAccept={handleVoiceAccept}
+            onReject={handleVoiceReject}
+            onCounter={handleVoiceCounter}
+          />
+        );
       case 'settings':
-        return <ProviderSettings isDark={isDark} onSwitchRole={onSwitchRole} />;
+        return (
+          <ProviderSettings
+            isDark={isDark}
+            onSwitchRole={onSwitchRole}
+            currentVoice={providerSettings.voiceURI}
+            currentLanguage={providerSettings.language}
+            onSave={handleSaveSettings}
+          />
+        );
       default:
         return null;
     }
@@ -144,11 +263,20 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
 
   return (
     <>
+      {activeToast && (
+        <NotificationToast
+          toast={activeToast}
+          isDark={isDark}
+          onDismiss={dismissToast}
+        />
+      )}
       {renderContent()}
       <BottomMenuBar
         isDark={isDark}
         role="provider"
         onNavigate={handleNavigate}
+        activeTab={currentTab}
+        badgeCount={assistantBadgeCount}
       />
     </>
   );

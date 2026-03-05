@@ -50,7 +50,9 @@ export const ActiveJobs: React.FC<ActiveJobsProps> = ({ isDark, providerId, onSe
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
         background: isDark
           ? 'linear-gradient(180deg, #000000 0%, #1C1C1E 100%)'
           : 'linear-gradient(180deg, #F2F2F7 0%, #FFFFFF 100%)',

@@ -1,18 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { ServiceRequest, CounterProposal } from '../../types';
-import { ArrowLeft, Calendar, Clock, MessageSquare } from 'lucide-react';
+import React, { useState } from 'react';
+import { ServiceRequest } from '../../types';
+import { ArrowLeft, Clock, MessageSquare } from 'lucide-react';
 import {
-  isSupabaseConfigured,
-  getCounterProposals,
-  approveCounterProposal,
-  rejectCounterProposal,
+  approveProposedTime,
+  rejectProposedTime,
 } from '../../services/supabaseService';
+
+function formatDisplayDate(dateStr: string): string {
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts.map(Number);
+    const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    }
+  }
+  return dateStr;
+}
 
 interface CounterProposalReviewProps {
   request: ServiceRequest;
   isDark: boolean;
   onBack: () => void;
   onResolved: () => void;
+  onProposeDifferentTime: (request: ServiceRequest) => void;
 }
 
 export const CounterProposalReview: React.FC<CounterProposalReviewProps> = ({
@@ -20,47 +31,31 @@ export const CounterProposalReview: React.FC<CounterProposalReviewProps> = ({
   isDark,
   onBack,
   onResolved,
+  onProposeDifferentTime,
 }) => {
-  const [proposals, setProposals] = useState<CounterProposal[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
-    const fetch = async () => {
-      if (!isSupabaseConfigured()) {
-        setIsLoading(false);
-        return;
-      }
-      try {
-        const data = await getCounterProposals(request.id);
-        setProposals(data.filter((p) => p.status === 'pending'));
-      } catch (err) {
-        console.error('Failed to fetch counter-proposals:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetch();
-  }, [request.id]);
-
-  const handleApprove = async (proposal: CounterProposal) => {
+  const handleApprove = async () => {
+    setIsProcessing(true);
     try {
-      await approveCounterProposal(proposal.id, request.id);
+      await approveProposedTime(request.id);
       onResolved();
     } catch (err) {
-      console.error('Failed to approve counter-proposal:', err);
+      console.error('Failed to approve proposed time:', err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const handleReject = async (proposal: CounterProposal) => {
+  const handleReject = async () => {
+    setIsProcessing(true);
     try {
-      await rejectCounterProposal(proposal.id, request.id);
-      // Remove from local list
-      setProposals((prev) => prev.filter((p) => p.id !== proposal.id));
-      if (proposals.length <= 1) {
-        onResolved();
-      }
+      await rejectProposedTime(request.id);
+      onResolved();
     } catch (err) {
-      console.error('Failed to reject counter-proposal:', err);
+      console.error('Failed to reject proposed time:', err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -74,15 +69,21 @@ export const CounterProposalReview: React.FC<CounterProposalReviewProps> = ({
     marginBottom: '16px',
   };
 
+  const lastEntry = request.proposal_history?.length
+    ? request.proposal_history[request.proposal_history.length - 1]
+    : null;
+
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
         background: isDark
           ? 'linear-gradient(180deg, #000000 0%, #1C1C1E 100%)'
           : 'linear-gradient(180deg, #F2F2F7 0%, #FFFFFF 100%)',
         paddingTop: '60px',
-        paddingBottom: '100px',
+        paddingBottom: '160px',
       }}
     >
       {/* Back button */}
@@ -118,7 +119,7 @@ export const CounterProposalReview: React.FC<CounterProposalReviewProps> = ({
             marginBottom: '8px',
           }}
         >
-          Counter-Proposals
+          Proposed Time
         </h1>
         <p style={{ fontSize: '15px', color: 'var(--label-secondary)', margin: 0 }}>
           {request.service_type === 'TIRE' ? 'Tire Service' : 'Mechanical Service'} — {request.fleet_name}
@@ -133,100 +134,177 @@ export const CounterProposalReview: React.FC<CounterProposalReviewProps> = ({
               Your Requested Schedule
             </div>
             <div style={{ fontSize: '17px', color: isDark ? 'var(--label-primary)' : '#000000', fontWeight: '500' }}>
-              {request.scheduled_appointment.scheduled_date} at {request.scheduled_appointment.scheduled_time}
+              {formatDisplayDate(request.scheduled_appointment.scheduled_date)} at {request.scheduled_appointment.scheduled_time}
             </div>
           </div>
         )}
 
-        {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--label-tertiary)', fontSize: '15px' }}>
-            Loading proposals...
-          </div>
-        ) : proposals.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--label-tertiary)', fontSize: '15px' }}>
-            No pending counter-proposals.
-          </div>
-        ) : (
-          proposals.map((proposal) => (
-            <div key={proposal.id} style={cardStyle}>
-              {/* Provider info */}
-              <div style={{ fontSize: '15px', fontWeight: '600', color: isDark ? 'var(--label-primary)' : '#000000', marginBottom: '12px' }}>
-                From: {proposal.provider_name}
-              </div>
-
-              {/* Proposed schedule */}
-              <div style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Calendar size={14} style={{ color: '#FF9500' }} />
-                  <span style={{ fontSize: '15px', color: isDark ? 'var(--label-primary)' : '#000000' }}>
-                    {proposal.proposed_date}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Clock size={14} style={{ color: '#FF9500' }} />
-                  <span style={{ fontSize: '15px', color: isDark ? 'var(--label-primary)' : '#000000' }}>
-                    {proposal.proposed_time}
-                  </span>
-                </div>
-              </div>
-
-              {/* Message */}
-              {proposal.message && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '16px' }}>
-                  <MessageSquare size={14} style={{ color: 'var(--label-tertiary)', marginTop: '2px' }} />
-                  <span style={{ fontSize: '14px', color: 'var(--label-secondary)', lineHeight: 1.4 }}>
-                    {proposal.message}
-                  </span>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={() => handleReject(proposal)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    color: '#FF3B30',
-                    background: isDark ? 'rgba(255, 59, 48, 0.12)' : 'rgba(255, 59, 48, 0.08)',
-                    border: 'none',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    transition: 'transform 0.1s ease',
-                  }}
-                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; }}
-                  onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={() => handleApprove(proposal)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    color: '#FFFFFF',
-                    background: '#34C759',
-                    border: 'none',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    transition: 'transform 0.1s ease',
-                    boxShadow: '0 2px 8px rgba(52, 199, 89, 0.3)',
-                  }}
-                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.97)'; }}
-                  onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                >
-                  Approve
-                </button>
-              </div>
+        {/* Current Proposed Time */}
+        {request.proposed_date && (
+          <div style={{ ...cardStyle, background: isDark ? 'rgba(255, 149, 0, 0.08)' : 'rgba(255, 149, 0, 0.05)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <Clock size={16} style={{ color: '#FF9500' }} />
+              <span style={{ fontSize: '13px', color: 'var(--label-tertiary)', textTransform: 'uppercase', fontWeight: '600' }}>
+                Provider&apos;s Proposed Time
+              </span>
             </div>
-          ))
+            <div style={{ fontSize: '20px', color: isDark ? 'var(--label-primary)' : '#000000', fontWeight: '600' }}>
+              {new Date(request.proposed_date).toLocaleString()}
+            </div>
+            {request.assigned_provider_name && (
+              <div style={{ fontSize: '14px', color: 'var(--label-secondary)', marginTop: '4px' }}>
+                From: {request.assigned_provider_name}
+              </div>
+            )}
+            {lastEntry?.notes && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '8px' }}>
+                <MessageSquare size={14} style={{ color: 'var(--label-tertiary)', marginTop: '2px' }} />
+                <span style={{ fontSize: '14px', color: 'var(--label-secondary)', lineHeight: 1.4, fontStyle: 'italic' }}>
+                  {lastEntry.notes}
+                </span>
+              </div>
+            )}
+          </div>
         )}
+
+        {/* Negotiation History */}
+        {request.proposal_history && request.proposal_history.length > 1 && (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <Clock size={16} style={{ color: '#8E8E93' }} />
+              <span style={{ fontSize: '15px', fontWeight: '600', color: isDark ? 'var(--label-primary)' : '#000000' }}>
+                Negotiation History
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {request.proposal_history.map((entry, idx) => {
+                const isFleet = entry.proposed_by === 'fleet_user';
+                const borderColor = isFleet ? '#007AFF' : '#FF9500';
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      borderLeft: `3px solid ${borderColor}`,
+                      paddingLeft: '12px',
+                      paddingTop: '4px',
+                      paddingBottom: '4px',
+                    }}
+                  >
+                    <div style={{ fontSize: '14px', fontWeight: '500', color: isDark ? 'var(--label-primary)' : '#000000' }}>
+                      {new Date(entry.proposed_date).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--label-tertiary)', marginTop: '2px' }}>
+                      {isFleet ? 'Fleet' : 'Provider'} — {new Date(entry.proposed_at).toLocaleString()}
+                    </div>
+                    {entry.notes && (
+                      <div style={{ fontSize: '13px', color: 'var(--label-secondary)', marginTop: '4px', fontStyle: 'italic' }}>
+                        {entry.notes}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons — fixed at bottom */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: '84px',
+          left: 0,
+          right: 0,
+          padding: '0 16px',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '640px',
+            margin: '0 auto',
+            display: 'flex',
+            gap: '10px',
+            pointerEvents: 'auto',
+          }}
+        >
+          {/* Reject */}
+          <button
+            onClick={handleReject}
+            disabled={isProcessing}
+            style={{
+              flex: 1,
+              padding: '14px',
+              fontSize: '15px',
+              fontWeight: '600',
+              color: '#FF3B30',
+              background: isDark ? 'rgba(255, 59, 48, 0.15)' : 'rgba(255, 59, 48, 0.1)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: isProcessing ? 'not-allowed' : 'pointer',
+              opacity: isProcessing ? 0.5 : 1,
+              transition: 'transform 0.1s ease',
+            }}
+            onMouseDown={(e) => { if (!isProcessing) e.currentTarget.style.transform = 'scale(0.97)'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            Reject
+          </button>
+
+          {/* Propose Different Time */}
+          <button
+            onClick={() => onProposeDifferentTime(request)}
+            disabled={isProcessing}
+            style={{
+              flex: 1,
+              padding: '14px',
+              fontSize: '15px',
+              fontWeight: '600',
+              color: '#FF9500',
+              background: isDark ? 'rgba(255, 149, 0, 0.15)' : 'rgba(255, 149, 0, 0.1)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: isProcessing ? 'not-allowed' : 'pointer',
+              opacity: isProcessing ? 0.5 : 1,
+              transition: 'transform 0.1s ease',
+            }}
+            onMouseDown={(e) => { if (!isProcessing) e.currentTarget.style.transform = 'scale(0.97)'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            Counter
+          </button>
+
+          {/* Accept */}
+          <button
+            onClick={handleApprove}
+            disabled={isProcessing}
+            style={{
+              flex: 1,
+              padding: '14px',
+              fontSize: '15px',
+              fontWeight: '600',
+              color: '#FFFFFF',
+              background: isProcessing ? (isDark ? 'rgba(52, 199, 89, 0.3)' : 'rgba(52, 199, 89, 0.5)') : '#34C759',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: isProcessing ? 'not-allowed' : 'pointer',
+              transition: 'transform 0.1s ease',
+              boxShadow: isProcessing ? 'none' : '0 4px 12px rgba(52, 199, 89, 0.3)',
+            }}
+            onMouseDown={(e) => { if (!isProcessing) e.currentTarget.style.transform = 'scale(0.97)'; }}
+            onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            Accept
+          </button>
+        </div>
       </div>
     </div>
   );

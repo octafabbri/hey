@@ -3,26 +3,20 @@ import { ServiceRequest } from '../types';
 import {
   isSupabaseConfigured,
   getServiceRequests,
-  getSessionUserId,
   subscribeToMyRequests,
 } from '../services/supabaseService';
 
-export function useServiceRequests() {
+export function useServiceRequests(userId?: string | null) {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchMyRequests = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || !userId) {
       setIsLoading(false);
       return;
     }
 
     try {
-      const userId = await getSessionUserId();
-      if (!userId) {
-        setIsLoading(false);
-        return;
-      }
       const data = await getServiceRequests({ createdBy: userId });
       setRequests(data);
     } catch (err) {
@@ -30,28 +24,21 @@ export function useServiceRequests() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     fetchMyRequests();
 
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || !userId) return;
 
-    let channel: ReturnType<typeof subscribeToMyRequests> | null = null;
-
-    (async () => {
-      const userId = await getSessionUserId();
-      if (!userId) return;
-
-      channel = subscribeToMyRequests(userId, () => {
-        fetchMyRequests();
-      });
-    })();
+    const channel = subscribeToMyRequests(userId, () => {
+      fetchMyRequests();
+    });
 
     return () => {
       channel?.unsubscribe();
     };
-  }, [fetchMyRequests]);
+  }, [fetchMyRequests, userId]);
 
   return { requests, isLoading, refresh: fetchMyRequests };
 }

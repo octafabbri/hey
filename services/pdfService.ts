@@ -2,6 +2,18 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { ServiceRequest } from '../types';
 
+function formatDisplayDate(dateStr: string): string {
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts.map(Number);
+    const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    }
+  }
+  return dateStr;
+}
+
 /**
  * Generates a PDF work order from a ServiceRequest
  * Uses html2canvas to render HTML template, then converts to PDF
@@ -197,7 +209,7 @@ const renderPDFHTML = (request: ServiceRequest): string => {
               SCHEDULED APPOINTMENT
             </h3>
             <p style="margin: 5px 0; font-size: 13px;">
-              <strong>Date:</strong> ${request.scheduled_appointment.scheduled_date}
+              <strong>Date:</strong> ${formatDisplayDate(request.scheduled_appointment.scheduled_date)}
             </p>
             <p style="margin: 5px 0; font-size: 13px;">
               <strong>Time:</strong> ${request.scheduled_appointment.scheduled_time}
