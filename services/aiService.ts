@@ -233,6 +233,59 @@ export const determineTaskFromInput = (input: string): { task: AssistantTask; re
 };
 
 /**
+ * Resolve a scheduled_date that may be a day name or relative term
+ * into an actual YYYY-MM-DD date string.
+ * Falls through to the original value if already in YYYY-MM-DD format.
+ */
+const resolveScheduledDate = (dateStr: string): string => {
+  // Already in YYYY-MM-DD format — return as-is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  const today = new Date();
+  const lower = dateStr.toLowerCase().trim();
+
+  // "today"
+  if (lower === 'today') {
+    return formatYMD(today);
+  }
+
+  // "tomorrow"
+  if (lower === 'tomorrow') {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 1);
+    return formatYMD(d);
+  }
+
+  // Day-of-week names (with optional "next" prefix)
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const cleaned = lower.replace(/^next\s+/, '');
+  const targetDay = dayNames.indexOf(cleaned);
+  if (targetDay !== -1) {
+    const currentDay = today.getDay();
+    let daysAhead = targetDay - currentDay;
+    if (daysAhead <= 0) daysAhead += 7; // always pick the upcoming occurrence
+    const d = new Date(today);
+    d.setDate(d.getDate() + daysAhead);
+    return formatYMD(d);
+  }
+
+  // Try parsing as a natural date string (e.g., "February 19, 2026")
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= today.getFullYear()) {
+    return formatYMD(parsed);
+  }
+
+  return dateStr;
+};
+
+const formatYMD = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/**
  * Extract structured service request data from conversation
  * Uses OpenAI to analyze conversation and extract fields
  */
@@ -242,7 +295,12 @@ export const extractServiceDataFromConversation = async (
 ): Promise<Partial<ServiceRequest>> => {
   const client = getAIClient();
 
+  const today = new Date();
+  const todayStr = today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
   const prompt = `You are extracting data from a roadside assistance conversation. Extract ALL information mentioned, even if implicit.
+
+TODAY'S DATE: ${todayStr}
 
 CONVERSATION:
 ${conversationHistory}
@@ -259,7 +317,7 @@ EXTRACTION RULES:
 3. Infer urgency CAREFULLY:
    - ERS: Unsafe location (highway shoulder, blocking lane) OR user says "emergency", "urgent", "ASAP", "right now"
    - DELAYED: User says "tomorrow", "tomorrow morning", "next day"
-   - SCHEDULED: User mentions scheduling, future dates, appointments
+   - SCHEDULED: User mentions scheduling, future dates, appointments, or any specific day of the week (e.g., "Wednesday", "next Monday")
    - DEFAULT: If unclear, leave as empty string
 4. Extract driver_name from any mention of the driver's name
 5. Extract location from highway numbers, mile markers, city names, streets, rest stops, exits
@@ -304,8 +362,8 @@ Return JSON with ALL extracted fields. Include fields even if partially complete
     "description": "string"
   },
   "scheduled_appointment": {
-    "scheduled_date": "string",
-    "scheduled_time": "string"
+    "scheduled_date": "YYYY-MM-DD format (e.g. 2026-02-18)",
+    "scheduled_time": "HH:MM AM/PM format (e.g. 10:00 AM)"
   }
 }
 
@@ -313,6 +371,7 @@ IMPORTANT:
 - Only include "tire_info" if service_type is "TIRE". Otherwise omit it.
 - Only include "mechanical_info" if service_type is "MECHANICAL". Otherwise omit it.
 - Only include "scheduled_appointment" if urgency is "SCHEDULED". Otherwise omit it.
+- ALWAYS resolve relative dates to actual calendar dates using today's date. For example: "Wednesday" → the next upcoming Wednesday, "tomorrow" → tomorrow's date, "next Monday" → the next Monday. Use YYYY-MM-DD format for scheduled_date.
 - Omit any field where the value is unknown or not mentioned.
 
 Return ONLY the JSON object, no other text.`;
@@ -330,6 +389,14 @@ Return ONLY the JSON object, no other text.`;
     console.log('📥 Raw OpenAI extraction response:', jsonText);
 
     const parsed = parseJsonFromString(jsonText) || {};
+
+    // Post-process: resolve any unresolved day names or relative dates
+    if (parsed.scheduled_appointment?.scheduled_date) {
+      parsed.scheduled_appointment.scheduled_date = resolveScheduledDate(
+        parsed.scheduled_appointment.scheduled_date
+      );
+    }
+
     console.log('📦 Parsed extraction result:', parsed);
 
     return parsed;

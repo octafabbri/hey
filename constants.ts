@@ -167,6 +167,8 @@ export const WELLNESS_CHECKIN_QUESTIONS: { key: keyof import('./types').MoodEntr
 
 
 export const USER_PROFILE_STORAGE_KEY = 'heyBibUserProfile';
+export const USER_ROLE_STORAGE_KEY = 'heyUserRole';
+export const DEVICE_ID_STORAGE_KEY = 'heyDeviceId';
 
 export const OPENAI_VOICES = [
   { name: 'Alloy (Neutral/Balanced)', id: 'alloy' },

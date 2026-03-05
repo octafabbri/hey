@@ -7,9 +7,10 @@ interface SettingsPageProps {
   currentLanguage?: string;
   onSave?: (settings: { voicePersona: string; language: string }) => void;
   onCancel?: () => void;
+  onSwitchRole?: () => void;
 }
 
-export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 'en-US', onSave, onCancel }: SettingsPageProps) {
+export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 'en-US', onSave, onCancel, onSwitchRole }: SettingsPageProps) {
   // Original values (from userProfile)
   const [originalVoice] = useState(currentVoice);
   const [originalLanguage] = useState(currentLanguage);
@@ -28,7 +29,6 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
         language: selectedLanguage,
       });
     }
-    console.log('Settings saved:', { voicePersona: selectedVoice, language: selectedLanguage });
   };
 
   const handleCancel = () => {
@@ -63,12 +63,14 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
         background: isDark
           ? 'linear-gradient(180deg, #000000 0%, #1C1C1E 100%)'
           : 'linear-gradient(180deg, #F2F2F7 0%, #FFFFFF 100%)',
         paddingTop: '60px',
-        paddingBottom: '100px',
+        paddingBottom: '180px',
       }}
     >
       {/* Header */}
@@ -264,7 +266,7 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
             border: `0.5px solid ${
               isDark ? 'rgba(84, 84, 88, 0.4)' : 'rgba(60, 60, 67, 0.18)'
             }`,
-            marginBottom: '120px',
+            marginBottom: '32px',
           }}
         >
           <p
@@ -280,6 +282,76 @@ export function SettingsPage({ isDark, currentVoice = 'onyx', currentLanguage = 
               : 'Your settings will apply to all future conversations with your AI assistant.'}
           </p>
         </div>
+
+        {/* Switch Role Section */}
+        {onSwitchRole && (
+          <div style={{ marginBottom: '120px' }}>
+            <div
+              style={{
+                padding: '0 8px',
+                marginBottom: '8px',
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  letterSpacing: '-0.01em',
+                  color: 'var(--label-secondary)',
+                  textTransform: 'uppercase',
+                  margin: 0,
+                }}
+              >
+                Account
+              </h2>
+            </div>
+
+            <button
+              onClick={onSwitchRole}
+              style={{
+                width: '100%',
+                padding: '16px',
+                fontSize: '17px',
+                fontWeight: 'var(--font-weight-regular)',
+                color: '#FF3B30',
+                background: isDark
+                  ? 'rgba(28, 28, 30, 0.7)'
+                  : 'rgba(255, 255, 255, 0.9)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                borderRadius: '12px',
+                border: `0.5px solid ${
+                  isDark ? 'rgba(84, 84, 88, 0.6)' : 'rgba(60, 60, 67, 0.29)'
+                }`,
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'transform 0.1s ease',
+              }}
+              onMouseDown={(e) => {
+                e.currentTarget.style.transform = 'scale(0.98)';
+              }}
+              onMouseUp={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              Switch Role
+            </button>
+
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'var(--label-tertiary)',
+                margin: '8px 8px 0 8px',
+                lineHeight: 1.4,
+              }}
+            >
+              Return to the role selection screen to switch between Fleet and Provider
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Fixed Action Buttons */}
