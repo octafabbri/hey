@@ -17,8 +17,8 @@ import {
 } from '../../services/speechService';
 import {
   WorkOrderCoordinationAgent,
-  parseNaturalDate,
   parseTimeString,
+  extractDateTime,
 } from '../../services/coordinationAgentService';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -87,63 +87,65 @@ function formatDateTimeForSpeech(date: string, time: string): string {
   }
 }
 
-// Extract date and time tokens from anywhere in a natural-language utterance.
-// Searches for each independently so filler words around them don't interfere.
-function extractDateTime(input: string): { date: string | null; time: string | null } {
-  const lower = input.toLowerCase().trim();
+// Match user input to a specific pending request by recency keywords or data fields
+// (fleet name, driver name, service type, urgency, location)
+function findMatchingRequest(input: string, requests: ServiceRequest[]): ServiceRequest | null {
+  if (!requests.length) return null;
+  const lower = input.toLowerCase();
 
-  // ── Time extraction (highest-specificity patterns win) ────────────────────
-  let time: string | null = null;
-
-  // "at <number> [am/pm]" — most explicit time signal
-  const atTimeMatch = lower.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/);
-  if (atTimeMatch) time = parseTimeString(atTimeMatch[1]);
-
-  // "[number] am/pm" anywhere (e.g. "9pm", "10 AM", "2:30pm")
-  if (!time) {
-    const meridiemMatch = lower.match(/\b(\d{1,2}(?::\d{2})?)\s*(am|pm|a\.m\.|p\.m\.)\b/);
-    if (meridiemMatch) time = parseTimeString(meridiemMatch[0]);
+  // Recency keywords → most recently submitted
+  if (/(newest|most recent|latest|just came in|last one)/.test(lower)) {
+    return [...requests].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )[0];
   }
 
-  // "H:MM" explicit colon format (24h or 12h)
-  if (!time) {
-    const colonMatch = lower.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (colonMatch) time = parseTimeString(colonMatch[0]);
-  }
+  // Score each request against the fields mentioned in the input
+  let bestMatch: ServiceRequest | null = null;
+  let bestScore = 0;
 
-  // "X o'clock"
-  if (!time) {
-    const oclockMatch = lower.match(/\b(\d{1,2})\s*o['']?clock\b/);
-    if (oclockMatch) time = parseTimeString(oclockMatch[1]);
-  }
+  for (const req of requests) {
+    let score = 0;
+    const serviceReadable = req.service_type.toLowerCase().replace(/_/g, ' ');
+    const urgencyReadable = req.urgency.toLowerCase().replace(/_/g, ' ');
+    const checks: Array<[string, number]> = [
+      [req.fleet_name, 3],
+      [req.driver_name, 2],
+      [serviceReadable, 2],
+      [urgencyReadable, 1],
+      [req.location.current_location ?? '', 1],
+      [req.location.highway_or_road ?? '', 1],
+    ];
 
-  // Named times
-  if (!time && /\bnoon\b/.test(lower)) time = '12:00';
-  if (!time && /\bmidnight\b/.test(lower)) time = '00:00';
+    for (const [val, weight] of checks) {
+      if (!val) continue;
+      const v = val.toLowerCase();
+      if (lower.includes(v)) {
+        score += weight * 2;
+      } else {
+        for (const word of v.split(/\s+/)) {
+          if (word.length > 3 && lower.includes(word)) score += weight;
+        }
+      }
+    }
 
-  // ── Date extraction ───────────────────────────────────────────────────────
-  let date: string | null = null;
-
-  if (/\btoday\b/.test(lower)) {
-    date = parseNaturalDate('today');
-  } else if (/\btomorrow\b/.test(lower)) {
-    date = parseNaturalDate('tomorrow');
-  } else {
-    // "next Monday", "this Tuesday", or bare day name anywhere in utterance
-    const dayMatch = lower.match(/\b(next\s+|this\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
-    if (dayMatch) date = parseNaturalDate(dayMatch[0].trim());
-
-    // "March 15th", "March 15" — month name + day
-    if (!date) {
-      const monthMatch = lower.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/);
-      if (monthMatch) date = parseNaturalDate(monthMatch[0]);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = req;
     }
   }
 
-  // Last resort: try parsing the whole input as a date
-  if (!date) date = parseNaturalDate(input);
+  return bestScore >= 2 ? bestMatch : null;
+}
 
-  return { date, time };
+// Returns a request only when it is uniquely named (fleet / driver) in the agent's response
+function findRequestInText(text: string, requests: ServiceRequest[]): ServiceRequest | null {
+  const lower = text.toLowerCase();
+  const mentioned = requests.filter(req => {
+    const terms = [req.fleet_name, req.driver_name].filter(Boolean);
+    return terms.some(t => t && lower.includes(t.toLowerCase()));
+  });
+  return mentioned.length === 1 ? mentioned[0] : null;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -329,7 +331,8 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       setAwaitingContext(null);
       perRequestAgentRef.current = null;
       await speakAiResponse(`Done, accepted the work order from ${fleet}.`);
-    } catch {
+    } catch (err) {
+      console.error('handleVoiceAccept error:', err);
       setAwaitingContext(null);
       await speakAiResponse('There was an issue accepting that. Please try from the dashboard.');
     }
@@ -345,7 +348,8 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       setAwaitingContext(null);
       perRequestAgentRef.current = null;
       await speakAiResponse(`Declined the work order from ${fleet}.`);
-    } catch {
+    } catch (err) {
+      console.error('handleVoiceDecline error:', err);
       setAwaitingContext(null);
       await speakAiResponse("Couldn't decline that right now. Please try from the dashboard.");
     }
@@ -367,7 +371,8 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       setCounterTime('');
       perRequestAgentRef.current = null;
       await speakAiResponse(`Counter-proposal sent for ${readable}.`);
-    } catch {
+    } catch (err) {
+      console.error('handleVoiceCounter error:', err);
       setAwaitingContext(null);
       await speakAiResponse("Couldn't submit that counter-proposal. Please try from the dashboard.");
     }
@@ -400,25 +405,48 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
     setAssistantState('processing');
     setTranscription('');
     const lower = input.toLowerCase().trim();
-    const ctx = awaitingContextRef.current;
-    const req = activeRequestRef.current;
+    let effectiveCtx = awaitingContextRef.current;
+    let effectiveReq = activeRequestRef.current;
 
     try {
+      // ── Shared action regexes ──────────────────────────────────────────────
+      const ACCEPT_RE = /(^|\b)(accept|take it|i'?ll take it|yes|yeah|yep|sure|sounds good|go ahead|that works|works for me|i can do (that|it)|i'?m available|book it|send it over|confirmed|do it|let'?s do it|i'?m in|count me in|absolutely|definitely|great|perfect|i'?ll do it|that'?s fine)(\b|$)/i;
+      const DECLINE_RE = /(^|\b)(decline|reject|pass|no thanks|not available|can'?t do (it|that)|cannot|busy|not interested|too far|i'?ll pass|no can do|won'?t work|doesn'?t work|not going to work|i'?m not available|skip it|can'?t make it|not for me|i'?d rather not)(\b|$)/i;
+      const COUNTER_RE = /(counter|propose|different time|can't make|how about|offer|suggest|reschedule)/;
+
+      // ── Request identification: match input to a specific pending request ──────
+      //    Supports recency ("newest", "most recent") and any request data field
+      //    (fleet name, driver name, service type, urgency, location)
+      if (effectiveCtx === null && effectiveReq === null) {
+        const matched = findMatchingRequest(input, pendingRequestsRef.current);
+        if (matched) {
+          effectiveReq = matched;
+          effectiveCtx = 'command';
+          setActiveRequest(matched);
+          setAwaitingContext('command');
+          activeRequestRef.current = matched;
+          awaitingContextRef.current = 'command';
+          if (!perRequestAgentRef.current) {
+            perRequestAgentRef.current = new WorkOrderCoordinationAgent(matched, 'service_provider', 'Provider');
+          }
+        }
+      }
+
       // ── Action flow (focused on a specific request) ────────────────────────
-      if (ctx === 'command' && req) {
+      if (effectiveCtx === 'command' && effectiveReq) {
         // Accept
-        if (/(^|\b)(accept|take it|i'll take it|yes|sounds good|go ahead)(\b|$)/.test(lower)) {
-          await handleVoiceAccept(req);
+        if (ACCEPT_RE.test(lower)) {
+          await handleVoiceAccept(effectiveReq);
           return;
         }
         // Decline
-        if (/(^|\b)(decline|reject|pass|no thanks|not available|can't do it|cannot)(\b|$)/.test(lower)) {
+        if (DECLINE_RE.test(lower)) {
           setAwaitingContext('decline-reason');
           await speakAiResponse('Got it. Want to give a reason, or just say skip to decline without one?');
           return;
         }
         // Counter — extract date/time from same utterance if provided
-        if (/(counter|propose|different time|can't make|how about|offer|suggest|reschedule)/.test(lower)) {
+        if (COUNTER_RE.test(lower)) {
           const { date, time } = extractDateTime(input);
           if (date && time) {
             setCounterDate(date);
@@ -440,23 +468,44 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
           await advanceToNextRequest();
           return;
         }
+        // Implicit counter-propose: user gave a complete date+time without a trigger keyword
+        // (e.g. "3pm on Tuesday" in response to the agent asking "what time works?")
+        // Require BOTH date and time to avoid false positives from incidental date mentions.
+        const { date: implicitDate, time: implicitTime } = extractDateTime(input);
+        if (implicitDate && implicitTime) {
+          setCounterDate(implicitDate);
+          setCounterTime(implicitTime);
+          setAwaitingContext('counter-confirm');
+          await speakAiResponse(`Counter-propose for ${formatDateTimeForSpeech(implicitDate, implicitTime)}. Is that right?`);
+          return;
+        }
+
         // Anything else: pass to per-request agent (reuse session — preserves
         // conversation history so the agent won't re-summarize the work order)
-        if (!perRequestAgentRef.current) {
-          perRequestAgentRef.current = new WorkOrderCoordinationAgent(req, 'service_provider', 'Provider');
+        const agentIsNew = !perRequestAgentRef.current;
+        if (agentIsNew) {
+          perRequestAgentRef.current = new WorkOrderCoordinationAgent(effectiveReq, 'service_provider', 'Provider');
+        }
+        // If the agent is brand-new (no prior summary turn), prime it with a
+        // context message so it knows the overview was already read aloud and
+        // it should answer the provider's question directly rather than re-introduce.
+        if (agentIsNew) {
+          await perRequestAgentRef.current.sendMessage(
+            '[System: The provider has already heard the work order summary. Answer their next question directly without re-summarizing.]'
+          );
         }
         const response = await perRequestAgentRef.current.sendMessage(input);
         await speakAiResponse(response);
         return;
       }
 
-      if (ctx === 'decline-reason') {
+      if (effectiveCtx === 'decline-reason') {
         const reason = /(^|\b)(skip|no reason|none|nothing|just decline)(\b|$)/.test(lower) ? '' : input;
-        await handleVoiceDecline(req!, reason);
+        await handleVoiceDecline(effectiveReq!, reason);
         return;
       }
 
-      if (ctx === 'counter-date') {
+      if (effectiveCtx === 'counter-date') {
         const { date, time } = extractDateTime(input);
         if (date) {
           if (time) {
@@ -475,7 +524,7 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
         return;
       }
 
-      if (ctx === 'counter-time') {
+      if (effectiveCtx === 'counter-time') {
         const parsedTime = parseTimeString(input);
         if (parsedTime) {
           setCounterTime(parsedTime);
@@ -487,11 +536,11 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
         return;
       }
 
-      if (ctx === 'counter-confirm') {
+      if (effectiveCtx === 'counter-confirm') {
         const confirmed = /(^|\b)(yes|yeah|yep|correct|right|that's right|sounds good|go ahead|confirm|perfect)(\b|$)/.test(lower);
         const denied = /(^|\b)(no|nope|wrong|change|different|not right|actually)(\b|$)/.test(lower);
         if (confirmed && !denied) {
-          await handleVoiceCounter(req!, counterDateRef.current, counterTimeRef.current);
+          await handleVoiceCounter(effectiveReq!, counterDateRef.current, counterTimeRef.current);
         } else if (denied) {
           setCounterDate('');
           setCounterTime('');
@@ -513,6 +562,19 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       const generalAgent = getGeneralAgent();
       if (generalAgent) {
         const response = await generalAgent.sendMessage(input);
+        // If the agent's response uniquely names one pending request (by fleet / driver),
+        // pre-set it as active so the next user turn can immediately act on it
+        // (e.g. say "yes" or "accept" after the agent asks "Do you want to accept X?")
+        const impliedReq = findRequestInText(response, pendingRequestsRef.current);
+        if (impliedReq) {
+          setActiveRequest(impliedReq);
+          setAwaitingContext('command');
+          activeRequestRef.current = impliedReq;
+          awaitingContextRef.current = 'command';
+          if (!perRequestAgentRef.current) {
+            perRequestAgentRef.current = new WorkOrderCoordinationAgent(impliedReq, 'service_provider', 'Provider');
+          }
+        }
         await speakAiResponse(response);
       } else {
         await speakAiResponse("You're all caught up — no pending work orders right now.");

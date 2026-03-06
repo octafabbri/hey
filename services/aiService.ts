@@ -124,32 +124,43 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
 };
 
 export const generateSpeech = async (text: string, voiceName: string = 'onyx'): Promise<string | null> => {
-  try {
-    // Validate and map voice names (handle old Gemini voices from localStorage)
-    const validVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
-    const validVoice = validVoices.includes(voiceName.toLowerCase()) ? voiceName.toLowerCase() : 'onyx';
+  // Validate and map voice names (handle old Gemini voices from localStorage)
+  const validVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+  const validVoice = validVoices.includes(voiceName.toLowerCase()) ? voiceName.toLowerCase() : 'onyx';
 
-    console.log(`🎤 Generating speech with voice: ${validVoice} (requested: ${voiceName}), text length: ${text.length}`);
-    const client = getAIClient();
+  console.log(`🎤 Generating speech with voice: ${validVoice} (requested: ${voiceName}), text length: ${text.length}`);
+  const client = getAIClient();
 
-    const response = await client.audio.speech.create({
-      model: OPENAI_MODEL_TTS,
-      voice: validVoice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
-      input: text,
-      response_format: 'mp3',
-    });
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await client.audio.speech.create({
+        model: OPENAI_MODEL_TTS,
+        voice: validVoice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+        input: text,
+        response_format: 'mp3',
+      });
 
-    // Convert response to base64 using chunked processing
-    const arrayBuffer = await response.arrayBuffer();
-    console.log(`✅ Received audio buffer: ${arrayBuffer.byteLength} bytes`);
-    const base64Audio = arrayBufferToBase64(arrayBuffer);
+      // Convert response to base64 using chunked processing
+      const arrayBuffer = await response.arrayBuffer();
+      console.log(`✅ Received audio buffer: ${arrayBuffer.byteLength} bytes`);
+      const base64Audio = arrayBufferToBase64(arrayBuffer);
 
-    console.log(`✅ Base64 audio length: ${base64Audio.length} chars`);
-    return base64Audio;
-  } catch (error) {
-    console.error("❌ Error generating speech:", error);
-    return null;
+      console.log(`✅ Base64 audio length: ${base64Audio.length} chars`);
+      return base64Audio;
+    } catch (error: any) {
+      const status = error?.status ?? error?.response?.status;
+      if ((status === 503 || status === 429) && attempt < maxAttempts) {
+        const delay = attempt * 1000;
+        console.warn(`⚠️ TTS attempt ${attempt} failed (${status}), retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      console.error("❌ Error generating speech:", error);
+      return null;
+    }
   }
+  return null;
 };
 
 /**

@@ -366,7 +366,7 @@ export const approveProposedTime = async (
 
   if (error) {
     console.error('Approve proposed time failed:', error);
-    return null;
+    throw error;
   }
   const row = Array.isArray(data) ? data[0] : data;
   return row ? rowToServiceRequest(row) : null;
@@ -384,7 +384,7 @@ export const rejectProposedTime = async (
 
   if (error) {
     console.error('Reject proposed time failed:', error);
-    return null;
+    throw error;
   }
   const row = Array.isArray(data) ? data[0] : data;
   return row ? rowToServiceRequest(row) : null;
