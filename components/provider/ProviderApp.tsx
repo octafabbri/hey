@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { ServiceRequest } from '../../types';
 import { BottomMenuBar } from '../BottomMenuBar';
 import { ProviderDashboard } from './ProviderDashboard';
@@ -35,11 +35,10 @@ import { NotificationToast } from '../NotificationToast';
 import {
   isSupabaseConfigured,
   acceptServiceRequest,
+  approveProposedTime,
   rejectServiceRequest,
   proposeNewTime,
   completeServiceRequest,
-  getServiceRequests,
-  subscribeToServiceRequests,
 } from '../../services/supabaseService';
 
 type ProviderTab = 'dashboard' | 'active' | 'assistant' | 'settings';
@@ -53,29 +52,10 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
   const [currentTab, setCurrentTab] = useState<ProviderTab>('assistant');
   const [currentView, setCurrentView] = useState<ProviderView>('list');
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
-  const [assistantBadgeCount, setAssistantBadgeCount] = useState(0);
   const [providerSettings, setProviderSettings] = useState<ProviderVoiceSettings>(loadProviderSettings);
   const isDark = false; // Match fleet: always light mode
   const { userId } = useSupabaseAuth();
-  const { activeToast, dismissToast } = useNotifications(userId);
-
-  // Fetch pending request count for the Assistant tab badge
-  const fetchAssistantBadge = useCallback(async () => {
-    if (!isSupabaseConfigured()) return;
-    try {
-      const data = await getServiceRequests({ status: ['submitted', 'counter_proposed'] });
-      setAssistantBadgeCount(data.length);
-    } catch {
-      // badge count is best-effort
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchAssistantBadge();
-    if (!isSupabaseConfigured()) return;
-    const channel = subscribeToServiceRequests(fetchAssistantBadge);
-    return () => { channel?.unsubscribe(); };
-  }, [fetchAssistantBadge]);
+  const { activeToast, dismissToast, unreadCount } = useNotifications(userId, 'provider');
 
   const handleSelectRequest = (request: ServiceRequest) => {
     setSelectedRequest(request);
@@ -91,7 +71,11 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
     if (!isSupabaseConfigured() || !userId) return;
 
     try {
-      await acceptServiceRequest(request.id, userId, 'Provider');
+      if (request.status === 'counter_proposed') {
+        await approveProposedTime(request.id);
+      } else {
+        await acceptServiceRequest(request.id, userId, 'Provider');
+      }
       handleBack();
     } catch (err) {
       console.error('Failed to accept request:', err);
@@ -150,7 +134,11 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
   // Voice-assistant-specific handlers (no navigation side-effects)
   const handleVoiceAccept = async (request: ServiceRequest) => {
     if (!isSupabaseConfigured() || !userId) return;
-    await acceptServiceRequest(request.id, userId, 'Provider');
+    if (request.status === 'counter_proposed') {
+      await approveProposedTime(request.id);
+    } else {
+      await acceptServiceRequest(request.id, userId, 'Provider');
+    }
   };
 
   const handleVoiceReject = async (requestId: string, reason: string) => {
@@ -162,7 +150,7 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
     requestId: string,
     data: { proposed_datetime: string; notes: string }
   ) => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured()) throw new Error('Supabase not configured');
     await proposeNewTime(requestId, data.proposed_datetime, data.notes || undefined);
   };
 
@@ -276,7 +264,7 @@ export const ProviderApp: React.FC<ProviderAppProps> = ({ onSwitchRole }) => {
         role="provider"
         onNavigate={handleNavigate}
         activeTab={currentTab}
-        badgeCount={assistantBadgeCount}
+        badgeCount={unreadCount}
       />
     </>
   );

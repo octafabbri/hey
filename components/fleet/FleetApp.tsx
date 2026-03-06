@@ -31,7 +31,7 @@ import { FleetCounterProposalForm } from './FleetCounterProposalForm';
 import { RequestDetailModal } from './RequestDetailModal';
 import { NotificationToast } from '../NotificationToast';
 import { proposeNewTime, approveProposedTime, rejectProposedTime } from '../../services/supabaseService';
-import { WorkOrderCoordinationAgent, parseNaturalDate, parseTimeString } from '../../services/coordinationAgentService';
+import { WorkOrderCoordinationAgent, parseNaturalDate, parseTimeString, extractDateTime } from '../../services/coordinationAgentService';
 
 type AssistantState = 'idle' | 'listening' | 'processing' | 'responding' | 'urgent' | 'resolution' | 'pdf-generating' | 'pdf-ready';
 type NavigationTab = 'home' | 'notifications' | 'settings';
@@ -102,8 +102,9 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
 
   // Voice-based counter-proposal review
   const [voiceReviewRequest, setVoiceReviewRequest] = useState<ServiceRequest | null>(null);
-  const [awaitingVoiceCtx, setAwaitingVoiceCtx] = useState<'command' | 'counter-date' | 'counter-time' | null>(null);
+  const [awaitingVoiceCtx, setAwaitingVoiceCtx] = useState<'command' | 'counter-date' | 'counter-time' | 'counter-confirm' | 'decline-reason' | null>(null);
   const [voiceCounterDate, setVoiceCounterDate] = useState('');
+  const [voiceCounterTime, setVoiceCounterTime] = useState('');
 
   // Refs
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -115,9 +116,11 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
   const assistantStartedRef = useRef(false);
   const toggleListenRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const voiceReviewRequestRef = useRef<ServiceRequest | null>(null);
-  const awaitingVoiceCtxRef = useRef<'command' | 'counter-date' | 'counter-time' | null>(null);
+  const awaitingVoiceCtxRef = useRef<'command' | 'counter-date' | 'counter-time' | 'counter-confirm' | 'decline-reason' | null>(null);
   const voiceCounterDateRef = useRef('');
+  const voiceCounterTimeRef = useRef('');
   const myRequestsRef = useRef<ServiceRequest[]>([]);
+  const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Keep refs in sync for use inside async callbacks (avoids stale closures)
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
@@ -126,6 +129,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
   useEffect(() => { voiceReviewRequestRef.current = voiceReviewRequest; }, [voiceReviewRequest]);
   useEffect(() => { awaitingVoiceCtxRef.current = awaitingVoiceCtx; }, [awaitingVoiceCtx]);
   useEffect(() => { voiceCounterDateRef.current = voiceCounterDate; }, [voiceCounterDate]);
+  useEffect(() => { voiceCounterTimeRef.current = voiceCounterTime; }, [voiceCounterTime]);
   useEffect(() => { myRequestsRef.current = myRequests; }, [myRequests]);
 
   useEffect(() => {
@@ -172,31 +176,34 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     }
   }, [assistantStarted, isListening, isLoadingAI, isSpeaking, isServiceRequestActive, activeServiceRequest, completedServiceRequest]);
 
-  // Handle speaking logic using OpenAI TTS
-  const speakAiResponse = useCallback(async (text: string) => {
+  // Handle speaking logic using OpenAI TTS — queued so concurrent calls play sequentially
+  const speakAiResponse = useCallback((text: string) => {
     if (!userProfile.voiceOutput.enabled || !text) return;
 
     currentAIResponseRef.current = text;
     setTranscription(text);
-    setIsResponseComplete(false);
-    setIsSpeaking(true);
 
-    try {
-      const voiceName = userProfile.voiceOutput.voiceURI || 'onyx';
-      const base64Audio = await generateSpeech(text, voiceName);
-
-      if (base64Audio) {
-        await playAudioContent(base64Audio, userProfile.voiceOutput.volume);
+    const task = async () => {
+      setIsResponseComplete(false);
+      setIsSpeaking(true);
+      try {
+        const voiceName = userProfile.voiceOutput.voiceURI || 'onyx';
+        const base64Audio = await generateSpeech(text, voiceName);
+        if (base64Audio) {
+          await playAudioContent(base64Audio, userProfile.voiceOutput.volume);
+        }
+      } catch (e) {
+        console.error("Error speaking AI response:", e);
+      } finally {
+        setIsSpeaking(false);
+        setIsResponseComplete(true);
+        // Auto-listen intentionally removed. AudioBufferSourceNode.onended fires
+        // before the audio pipeline finishes rendering, so the mic would open while
+        // speech is still audible. User taps the orb to speak instead.
       }
-    } catch (e) {
-      console.error("Error speaking AI response:", e);
-    } finally {
-      setIsSpeaking(false);
-      setIsResponseComplete(true);
-      // Auto-listen intentionally removed. AudioBufferSourceNode.onended fires
-      // before the audio pipeline finishes rendering, so the mic would open while
-      // speech is still audible. User taps the orb to speak instead.
-    }
+    };
+
+    speechQueueRef.current = speechQueueRef.current.then(task);
   }, [userProfile.voiceOutput]);
 
   // Get time-appropriate greeting
@@ -236,8 +243,8 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
 
     const timeGreeting = getTimeBasedGreeting();
     const greeting = userProfile.userName
-      ? `${timeGreeting}, ${userProfile.userName}! This is Mr. Roboto. What can I help you with?`
-      : `${timeGreeting}! This is Mr. Roboto. How can I help you today?`;
+      ? `${timeGreeting}, ${userProfile.userName}! This is Serv. What can I help you with?`
+      : `${timeGreeting}! This is Serv. How can I help you today?`;
 
     addMessage('ai', greeting);
     speakAiResponse(greeting);
@@ -424,6 +431,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       if (validation.isComplete) {
         const prompt = "Want me to read back the details before submitting?";
         addMessage('ai', prompt);
+        speakAiResponse(aiText);
         speakAiResponse(prompt);
         setIsAwaitingSummaryPrompt(true);
       } else {
@@ -549,6 +557,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       if (validation.isComplete) {
         const prompt = "Want me to read back the details before submitting?";
         addMessage('ai', prompt);
+        speakAiResponse(aiText);
         speakAiResponse(prompt);
         setIsAwaitingSummaryPrompt(true);
       } else {
@@ -592,6 +601,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       setVoiceReviewRequest(null);
       setAwaitingVoiceCtx(null);
       setVoiceCounterDate('');
+      setVoiceCounterTime('');
     };
 
     setIsLoadingAI(true);
@@ -611,31 +621,22 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
         }
         // Decline
         if (/(^|\b)(decline|reject|no$|pass|won't work|can't make|not good|different)(\b|$)/.test(lower)) {
-          await rejectProposedTime(req.id);
-          resetVoiceReview();
-          refreshNotifications();
-          refreshRequests();
-          handleAiResponseDisplay("Declined. The request has been reopened for other providers to respond.");
+          setAwaitingVoiceCtx('decline-reason');
+          handleAiResponseDisplay("Got it. Want to give the provider a reason, or just say skip?");
           return;
         }
-        // Counter-propose
+        // Counter-propose — extract date/time anywhere in the utterance
         if (/(counter|propose|different time|how about|reschedule|try|offer|suggest)/.test(lower)) {
-          // Try to parse inline date+time (e.g. "counter, how about next Tuesday at 2pm")
-          const atIdx = lower.indexOf(' at ');
-          const datePart = atIdx !== -1 ? text.substring(0, atIdx) : text;
-          const parsedDate = parseNaturalDate(datePart) || parseNaturalDate(text);
+          const { date: parsedDate, time: parsedTime } = extractDateTime(text);
+          if (parsedDate && parsedTime) {
+            setVoiceCounterDate(parsedDate);
+            setVoiceCounterTime(parsedTime);
+            setAwaitingVoiceCtx('counter-confirm');
+            const readable = new Date(`${parsedDate}T${parsedTime}:00`).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+            handleAiResponseDisplay(`Counter-propose for ${readable}. Is that right?`);
+            return;
+          }
           if (parsedDate) {
-            const parsedTime = atIdx !== -1 ? parseTimeString(text.substring(atIdx + 4)) : null;
-            if (parsedTime) {
-              const isoDatetime = new Date(`${parsedDate}T${parsedTime}:00`).toISOString();
-              await proposeNewTime(req.id, isoDatetime, '');
-              resetVoiceReview();
-              refreshNotifications();
-              refreshRequests();
-              const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-              handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
-              return;
-            }
             setVoiceCounterDate(parsedDate);
             setAwaitingVoiceCtx('counter-time');
             handleAiResponseDisplay('What time works for you?');
@@ -659,24 +660,19 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       }
 
       if (ctx === 'counter-date') {
-        const atIdx = lower.indexOf(' at ');
-        const datePart = atIdx !== -1 ? text.substring(0, atIdx).trim() : text;
-        const parsedDate = parseNaturalDate(datePart) || parseNaturalDate(text);
+        const { date: parsedDate, time: parsedTime } = extractDateTime(text);
         if (parsedDate) {
-          const parsedTime = atIdx !== -1 ? parseTimeString(text.substring(atIdx + 4)) : null;
           if (parsedTime) {
-            const isoDatetime = new Date(`${parsedDate}T${parsedTime}:00`).toISOString();
-            await proposeNewTime(req.id, isoDatetime, '');
-            resetVoiceReview();
-            refreshNotifications();
-            refreshRequests();
-            const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-            handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
-            return;
+            setVoiceCounterDate(parsedDate);
+            setVoiceCounterTime(parsedTime);
+            setAwaitingVoiceCtx('counter-confirm');
+            const readable = new Date(`${parsedDate}T${parsedTime}:00`).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+            handleAiResponseDisplay(`Counter-propose for ${readable}. Is that right?`);
+          } else {
+            setVoiceCounterDate(parsedDate);
+            setAwaitingVoiceCtx('counter-time');
+            handleAiResponseDisplay('What time works?');
           }
-          setVoiceCounterDate(parsedDate);
-          setAwaitingVoiceCtx('counter-time');
-          handleAiResponseDisplay('What time works?');
         } else {
           handleAiResponseDisplay("Didn't catch that date. Try something like next Tuesday or March 10th.");
         }
@@ -686,16 +682,45 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
       if (ctx === 'counter-time') {
         const parsedTime = parseTimeString(text);
         if (parsedTime) {
-          const isoDatetime = new Date(`${voiceCounterDateRef.current}T${parsedTime}:00`).toISOString();
-          await proposeNewTime(req.id, isoDatetime, '');
-          resetVoiceReview();
-          refreshNotifications();
-          refreshRequests();
-          const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-          handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
+          setVoiceCounterTime(parsedTime);
+          setAwaitingVoiceCtx('counter-confirm');
+          const readable = new Date(`${voiceCounterDateRef.current}T${parsedTime}:00`).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+          handleAiResponseDisplay(`Counter-propose for ${readable}. Is that right?`);
         } else {
           handleAiResponseDisplay("What time works? Try something like 2 PM or 9 in the morning.");
         }
+        return;
+      }
+
+      if (ctx === 'counter-confirm') {
+        const confirmed = /(^|\b)(yes|yeah|yep|correct|right|that's right|sounds good|go ahead|confirm|perfect)(\b|$)/.test(lower);
+        const denied = /(^|\b)(no|nope|wrong|change|different|not right|actually)(\b|$)/.test(lower);
+        if (confirmed && !denied) {
+          const isoDatetime = new Date(`${voiceCounterDateRef.current}T${voiceCounterTimeRef.current}:00`).toISOString();
+          await proposeNewTime(req.id, isoDatetime, '');
+          const readable = new Date(isoDatetime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+          resetVoiceReview();
+          refreshNotifications();
+          refreshRequests();
+          handleAiResponseDisplay(`Counter-proposal sent for ${readable}.`);
+        } else if (denied) {
+          setVoiceCounterDate('');
+          setVoiceCounterTime('');
+          setAwaitingVoiceCtx('counter-date');
+          handleAiResponseDisplay('What date and time works for you?');
+        } else {
+          handleAiResponseDisplay('Say yes to send that counter-proposal, or no to change it.');
+        }
+        return;
+      }
+
+      if (ctx === 'decline-reason') {
+        const reason = /(^|\b)(skip|no reason|none|nothing|just decline)(\b|$)/.test(lower) ? undefined : text;
+        await rejectProposedTime(req.id, reason);
+        resetVoiceReview();
+        refreshNotifications();
+        refreshRequests();
+        handleAiResponseDisplay("Declined. The request has been reopened for other providers to respond.");
         return;
       }
     } catch (err) {
@@ -858,6 +883,7 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
     } else {
       if (isSpeaking && userProfile.voiceOutput.enabled) {
         stopAudioPlayback();
+        speechQueueRef.current = Promise.resolve(); // discard any queued speech
         setIsSpeaking(false);
       }
 
@@ -1110,10 +1136,10 @@ export const FleetApp: React.FC<FleetAppProps> = ({ onSwitchRole }) => {
               🚛
             </div>
             <h1 style={{ fontSize: '34px', fontWeight: 'var(--font-weight-bold)', color: 'var(--label-primary)', marginBottom: '12px' }}>
-              Mr. Roboto
+              Michelin Services
             </h1>
             <p style={{ fontSize: '20px', color: 'var(--label-secondary)', marginBottom: '40px' }}>
-              Your Voice Assistant
+              Powered by Serv
             </p>
             <div style={{ fontSize: '15px', color: 'var(--label-tertiary)', cursor: 'pointer' }}>
               Tap anywhere to start

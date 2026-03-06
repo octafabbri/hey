@@ -100,7 +100,13 @@ function buildCoordinationSystemPrompt(
 
   const roleContext =
     role === 'service_provider'
-      ? `You are assisting ${callerName}, a service provider. Help them understand incoming work orders and respond. Available actions: accept, decline (with optional reason), or counter-propose a new date and time.`
+      ? `You are assisting ${callerName}, a service provider. Help them understand incoming work orders and respond. Available actions: accept, decline (with optional reason), or counter-propose a new date and time.
+
+ANSWERING QUESTIONS — critical rules:
+- When the provider asks a specific factual question (address, phone number, tire size, driver name, location, etc.), answer with ONLY that fact in one sentence. Do NOT re-summarize the work order or repeat information from a previous turn.
+- Examples of correct answers: "The driver is at mile marker 220 on I-40 near Amarillo." / "The contact number is 555-867-5309." / "It's a 295/75R22.5 on the right rear drive axle."
+- After answering a factual question, add a single brief natural prompt back to the decision — something like "Does that work for you?" or "Want to go ahead and accept it?" One sentence only.
+- Never start your answer with a re-introduction of the work order ("So this is an ERS call from..." etc.) unless the provider explicitly asked for a full summary.`
       : `You are assisting ${callerName}, a fleet manager. Help them review provider responses and make decisions.`;
 
   const today = new Date().toLocaleDateString('en-US', {
@@ -224,4 +230,67 @@ export function parseTimeString(input: string): string | null {
 
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/**
+ * Extracts date and time tokens from anywhere in a natural-language utterance.
+ * Searches for each independently so filler words around them don't interfere.
+ * E.g. "lets counter. send over monday at 9 and see what they say"
+ *   → { date: '2026-03-09', time: '09:00' }
+ */
+export function extractDateTime(input: string): { date: string | null; time: string | null } {
+  const lower = input.toLowerCase().trim();
+
+  // ── Time (highest-specificity patterns win) ───────────────────────────────
+  let time: string | null = null;
+
+  // "at <number> [am/pm]" — most explicit signal
+  const atTimeMatch = lower.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/);
+  if (atTimeMatch) time = parseTimeString(atTimeMatch[1]);
+
+  // "[number] am/pm" anywhere
+  if (!time) {
+    const meridiemMatch = lower.match(/\b(\d{1,2}(?::\d{2})?)\s*(am|pm|a\.m\.|p\.m\.)\b/);
+    if (meridiemMatch) time = parseTimeString(meridiemMatch[0]);
+  }
+
+  // "H:MM" explicit colon format
+  if (!time) {
+    const colonMatch = lower.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (colonMatch) time = parseTimeString(colonMatch[0]);
+  }
+
+  // "X o'clock"
+  if (!time) {
+    const oclockMatch = lower.match(/\b(\d{1,2})\s*o['']?clock\b/);
+    if (oclockMatch) time = parseTimeString(oclockMatch[1]);
+  }
+
+  // Named times
+  if (!time && /\bnoon\b/.test(lower)) time = '12:00';
+  if (!time && /\bmidnight\b/.test(lower)) time = '00:00';
+
+  // ── Date ─────────────────────────────────────────────────────────────────
+  let date: string | null = null;
+
+  if (/\btoday\b/.test(lower)) {
+    date = parseNaturalDate('today');
+  } else if (/\btomorrow\b/.test(lower)) {
+    date = parseNaturalDate('tomorrow');
+  } else {
+    // "next Monday", "this Tuesday", or bare day name anywhere in utterance
+    const dayMatch = lower.match(/\b(next\s+|this\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+    if (dayMatch) date = parseNaturalDate(dayMatch[0].trim());
+
+    // "March 15th", "March 15" — month name + day
+    if (!date) {
+      const monthMatch = lower.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/);
+      if (monthMatch) date = parseNaturalDate(monthMatch[0]);
+    }
+  }
+
+  // Last resort: try parsing the whole input
+  if (!date) date = parseNaturalDate(input);
+
+  return { date, time };
 }

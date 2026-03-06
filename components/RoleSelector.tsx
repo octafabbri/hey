@@ -21,7 +21,7 @@ export const RoleSelector: React.FC<RoleSelectorProps> = ({ onRoleSelected }) =>
             marginBottom: '8px',
           }}
         >
-          Mr. Roboto
+          Michelin Services
         </h1>
         <p
           style={{
@@ -30,7 +30,7 @@ export const RoleSelector: React.FC<RoleSelectorProps> = ({ onRoleSelected }) =>
             marginBottom: '48px',
           }}
         >
-          Roadside Assistance
+          Powered by Serv
         </p>
 
         {/* Fleet / Driver Card */}

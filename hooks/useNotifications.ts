@@ -27,7 +27,7 @@ export interface ToastAlert {
 
 const TOAST_DURATION_MS = 5000;
 
-export function useNotifications(userId?: string | null) {
+export function useNotifications(userId?: string | null, role?: 'fleet' | 'provider') {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeToast, setActiveToast] = useState<ToastAlert | null>(null);
@@ -57,7 +57,23 @@ export function useNotifications(userId?: string | null) {
     if (!isSupabaseConfigured() || !userId) return;
 
     try {
-      // Get requests with actionable statuses
+      // Server notifications are RLS-filtered to auth.uid() — works for both roles
+      let serverUnread = 0;
+      try {
+        const serverNotifs = await getServerNotifications(true);
+        serverUnread = serverNotifs.length;
+      } catch {
+        // ignore — badge degrades gracefully
+      }
+
+      if (role === 'provider') {
+        // Providers have no requests they created; rely entirely on server notifications
+        setNotifications([]);
+        setUnreadCount(serverUnread);
+        return;
+      }
+
+      // Fleet: build rich notification list from requests created by this user
       const counterProposed = await getServiceRequests({ status: 'counter_proposed', createdBy: userId });
       const accepted = await getServiceRequests({ status: 'accepted', createdBy: userId });
       const rejected = await getServiceRequests({ status: 'rejected', createdBy: userId });
@@ -83,23 +99,13 @@ export function useNotifications(userId?: string | null) {
         })),
       ];
 
-      // Sort newest first
       notifs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
       setNotifications(notifs);
-
-      // Unread count: counter-proposals always need action + unread server notifications
-      let serverUnread = 0;
-      try {
-        const serverNotifs = await getServerNotifications(true);
-        serverUnread = serverNotifs.length;
-      } catch {
-        // Fall back to counter-proposals only if server notifications unavailable
-      }
       setUnreadCount(Math.max(counterProposed.length, serverUnread));
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
     }
-  }, [userId]);
+  }, [userId, role]);
 
   const markAllRead = useCallback(async () => {
     await markAllNotificationsRead();
@@ -111,19 +117,27 @@ export function useNotifications(userId?: string | null) {
 
     if (!isSupabaseConfigured() || !userId) return;
 
-    // Subscribe to request status changes
-    const requestChannel = subscribeToMyRequests(userId, () => {
-      fetchNotifications();
-    });
+    // Fleet only: subscribe to status changes on requests they created
+    const requestChannel = role !== 'provider'
+      ? subscribeToMyRequests(userId, () => { fetchNotifications(); })
+      : null;
 
-    // Subscribe to server-side notifications (real-time inserts)
-    // Capture the payload to show a toast alert
+    // Subscribe to server-side notifications (real-time inserts, filtered by recipient_id)
     const notifChannel = subscribeToNotifications(userId, (payload: unknown) => {
-      fetchNotifications();
-
       // Extract notification row from realtime payload
       const record = (payload as { new?: Record<string, unknown> })?.new;
-      if (record && typeof record === 'object') {
+
+      // Guard: Supabase Realtime filters on RLS tables are not always enforced
+      // server-side, so we must verify the notification is actually for this user
+      // before refreshing counts or showing a toast.
+      // Normalise to lowercase strings so UUID format differences don't break equality.
+      const recordRecipient = record ? String(record.recipient_id ?? '').toLowerCase() : '';
+      const currentUser = String(userId ?? '').toLowerCase();
+      if (!recordRecipient || !currentUser || recordRecipient !== currentUser) return;
+
+      fetchNotifications();
+
+      if (typeof record === 'object') {
         const eventType = record.event_type as string;
         const requestId = record.request_id as string;
         const message = record.message as string;
