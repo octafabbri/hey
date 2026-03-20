@@ -294,3 +294,41 @@ export function extractDateTime(input: string): { date: string | null; time: str
 
   return { date, time };
 }
+
+/**
+ * AI-powered date/time extraction for counter-proposal utterances.
+ * Unlike extractDateTime, this understands negations and intent:
+ * "I can't do Tuesday, how about Monday at 9" → Monday, not Tuesday.
+ * Falls back to extractDateTime if the AI call fails.
+ */
+export async function extractProposedDateTime(
+  input: string
+): Promise<{ date: string | null; time: string | null }> {
+  const todayStr = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  });
+  const session = new ChatSession(
+    `Today is ${todayStr}. Extract the date and time being PROPOSED from a voice transcript. ` +
+    `The speaker may mention dates they cannot do — ignore those entirely. ` +
+    `Reply with ONLY a JSON object, no other text.`,
+    0
+  );
+  try {
+    const result = await session.sendMessage({
+      message:
+        `Extract the proposed date and time from: "${input}"\n\n` +
+        `Return: {"date": "YYYY-MM-DD", "time": "HH:MM"}\n` +
+        `Use null for any field not mentioned. Resolve relative expressions ` +
+        `("monday", "next tuesday", "tomorrow") to actual YYYY-MM-DD dates.`,
+    });
+    const cleaned = result.text.trim().replace(/```(?:json)?\n?|```/g, '').trim();
+    const json = JSON.parse(cleaned);
+    const date =
+      typeof json.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(json.date) ? json.date : null;
+    const time =
+      typeof json.time === 'string' && /^\d{2}:\d{2}$/.test(json.time) ? json.time : null;
+    return { date, time };
+  } catch {
+    return extractDateTime(input);
+  }
+}
