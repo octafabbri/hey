@@ -19,6 +19,7 @@ import {
   WorkOrderCoordinationAgent,
   parseTimeString,
   extractDateTime,
+  extractProposedDateTime,
 } from '../../services/coordinationAgentService';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -412,7 +413,7 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       // ── Shared action regexes ──────────────────────────────────────────────
       const ACCEPT_RE = /(^|\b)(accept|take it|i'?ll take it|yes|yeah|yep|sure|sounds good|go ahead|that works|works for me|i can do (that|it)|i'?m available|book it|send it over|confirmed|do it|let'?s do it|i'?m in|count me in|absolutely|definitely|great|perfect|i'?ll do it|that'?s fine)(\b|$)/i;
       const DECLINE_RE = /(^|\b)(decline|reject|pass|no thanks|not available|can'?t do (it|that)|cannot|busy|not interested|too far|i'?ll pass|no can do|won'?t work|doesn'?t work|not going to work|i'?m not available|skip it|can'?t make it|not for me|i'?d rather not)(\b|$)/i;
-      const COUNTER_RE = /(counter|propose|different time|can't make|how about|offer|suggest|reschedule)/;
+      const COUNTER_RE = /(counter|propose|different time|can't make|how about|offer|suggest|reschedule|see if|what if|can we|could we|instead)/i;
 
       // ── Request identification: match input to a specific pending request ──────
       //    Supports recency ("newest", "most recent") and any request data field
@@ -445,9 +446,10 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
           await speakAiResponse('Got it. Want to give a reason, or just say skip to decline without one?');
           return;
         }
-        // Counter — extract date/time from same utterance if provided
+        // Counter — use AI extraction so negations like "I can't do Tuesday,
+        // how about Monday at 9" resolve to the correct proposed day.
         if (COUNTER_RE.test(lower)) {
-          const { date, time } = extractDateTime(input);
+          const { date, time } = await extractProposedDateTime(input);
           if (date && time) {
             setCounterDate(date);
             setCounterTime(time);
@@ -457,6 +459,10 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
             setCounterDate(date);
             setAwaitingContext('counter-time');
             await speakAiResponse('And what time works?');
+          } else if (time) {
+            setCounterTime(time);
+            setAwaitingContext('counter-date');
+            await speakAiResponse("Got the time. Which day works for you?");
           } else {
             setAwaitingContext('counter-date');
             await speakAiResponse('What date and time works for you?');
@@ -506,20 +512,23 @@ export const ProviderVoiceAssistant: React.FC<ProviderVoiceAssistantProps> = ({
       }
 
       if (effectiveCtx === 'counter-date') {
-        const { date, time } = extractDateTime(input);
+        // Try fast regex first; fall back to AI for phrases like "the 15th" or "March 9th"
+        let { date, time } = extractDateTime(input);
+        if (!date) ({ date, time } = await extractProposedDateTime(input));
         if (date) {
-          if (time) {
+          const resolvedTime = time || counterTimeRef.current;
+          if (resolvedTime) {
             setCounterDate(date);
-            setCounterTime(time);
+            setCounterTime(resolvedTime);
             setAwaitingContext('counter-confirm');
-            await speakAiResponse(`Counter-propose for ${formatDateTimeForSpeech(date, time)}. Is that right?`);
+            await speakAiResponse(`Counter-propose for ${formatDateTimeForSpeech(date, resolvedTime)}. Is that right?`);
           } else {
             setCounterDate(date);
             setAwaitingContext('counter-time');
             await speakAiResponse('And what time works?');
           }
         } else {
-          await speakAiResponse("Didn't catch that. What date and time works for you?");
+          await speakAiResponse("Didn't catch that. What day works for you?");
         }
         return;
       }
